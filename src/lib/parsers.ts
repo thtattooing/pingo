@@ -17,14 +17,13 @@ export interface ParseDebug {
 
 // ─────────────────────────────────────────── parseDate
 function parseDate(raw: string): string {
-  // Strip OFX timezone suffix like 20250115120000[-3:BRT] or 20250115120000+00
   const s = raw.trim()
-    .replace(/\[.*?\]/g, "")   // remove [...]
+    .replace(/\[.*?\]/g, "")   // remove OFX timezone [...]
     .replace(/T.*$/,      "")   // remove T... (ISO datetime)
     .replace(/\s.*/,      "")   // remove trailing time
     .trim();
 
-  // YYYY-MM-DD (already correct — do NOT split on dash here)
+  // YYYY-MM-DD (already correct — do NOT split on dash)
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
 
   // DD/MM/YYYY or DD-MM-YYYY
@@ -53,9 +52,8 @@ function csvSplit(line: string, sep: string): string[] {
 // ─────────────────────────────────────────── parseAmount
 function parseAmount(s: string): number {
   if (!s) return NaN;
-  // Strip currency symbols, spaces and stray quotes
   let v = s.replace(/[R$\s"']/g, "").trim();
-  if (!v) return NaN;
+  if (!v || v === "-") return NaN;
 
   // BRL format: 1.234,56  or  1234,56  (comma = decimal)
   if (/\d,\d{1,2}$/.test(v)) {
@@ -63,6 +61,16 @@ function parseAmount(s: string): number {
   }
   // US/ISO format: 1,234.56 or 1234.56
   return parseFloat(v.replace(/,/g, ""));
+}
+
+// ─────────────────────────────────────────── looksLikeDate (content-based)
+function looksLikeDate(v: string): boolean {
+  const s = v.trim();
+  return (
+    /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}/.test(s) ||   // DD/MM/YYYY
+    /^\d{4}[\/\-]\d{2}[\/\-]\d{2}/.test(s) ||        // YYYY-MM-DD
+    /^\d{8,14}$/.test(s.replace(/\s/g, ""))           // YYYYMMDD or timestamp
+  );
 }
 
 // ─────────────────────────────────────────── parseCSV
@@ -85,19 +93,55 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
   const fi = (...terms: string[]) =>
     hdr.findIndex(h => terms.some(t => h.trim().includes(t)));
 
-  const dateI = fi(
-    "data", "date", "dt ", "dt.", "vencimento", "competência", "competencia", "período", "periodo",
+  // ── Header-based column detection ──
+  let dateI = fi(
+    "data", "date", "dt ", "dt.", "vencimento", "competência", "competencia",
+    "período", "periodo", "lançament", "lancament",
   );
-  const descI = fi(
-    "descri", "title", "titulo", "lancamento", "lançamento",
-    "histórico", "historico", "histor", "memo", "estabelecimento",
-    "transaç", "transac", "detalhe", "referência", "referencia", "nome",
+  let descI = fi(
+    "descri", "title", "titulo", "histórico", "historico", "histor",
+    "memo", "estabelecimento", "transaç", "transac", "detalhe",
+    "referência", "referencia", "nome", "operação", "operac", "narrativa",
   );
-  const amtI = fi(
+
+  // Split debit/credit detection (Itaú, Bradesco, Santander style)
+  const creditI = fi("crédit", "credit", "entrada");
+  const debitI  = fi("débito", "debito", "saída", "saida");
+  const hasSplitCols = creditI >= 0 && debitI >= 0 && creditI !== debitI;
+
+  let amtI = hasSplitCols ? -1 : fi(
     "valor", "amount", "quantia", "montante", "vlr", "vl.",
-    "débito", "debito", "crédit", "credit",
-    "saída", "saida", "entrada",
+    "débito", "debito", "crédit", "credit", "saída", "saida", "entrada",
+    "mov.", "moviment",
   );
+
+  // ── Content-based auto-detect (fallback when headers are unknown/garbled) ──
+  const dataRows = lines.slice(1, Math.min(7, lines.length)).map(l => csvSplit(l, sep));
+  const colCount = hdr.length;
+
+  if (dateI === -1) {
+    for (let col = 0; col < colCount; col++) {
+      const vals = dataRows.map(r => (r[col] ?? "").trim()).filter(v => v.length > 0);
+      if (vals.length > 0 && vals.every(v => looksLikeDate(v))) {
+        dateI = col;
+        break;
+      }
+    }
+  }
+
+  if (amtI === -1 && !hasSplitCols) {
+    // Scan from right — amount is typically near the end
+    for (let col = colCount - 1; col >= 0; col--) {
+      if (col === dateI || col === descI) continue;
+      const vals = dataRows.map(r => (r[col] ?? "").trim()).filter(v => v.length > 0);
+      const parsed = vals.map(v => parseAmount(v));
+      const valid  = parsed.filter(n => !isNaN(n));
+      if (valid.length > 0 && valid.length >= vals.length * 0.5) {
+        amtI = col;
+        break;
+      }
+    }
+  }
 
   const debug: ParseDebug = {
     rawFirstLines: lines.slice(0, 4),
@@ -105,33 +149,51 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
     headers: hdr,
     dateCol: dateI,
     descCol: descI,
-    amtCol:  amtI,
+    amtCol:  hasSplitCols ? creditI : amtI,
     rowsParsed: 0,
   };
 
-  if (dateI === -1 || amtI === -1) return { rows: [], debug };
+  if (dateI === -1 || (amtI === -1 && !hasSplitCols)) return { rows: [], debug };
 
-  // Detect mixed-sign: account statement (income + expense) vs credit card (all expense)
-  const samples = lines.slice(1, Math.min(10, lines.length))
-    .map(l => parseAmount(csvSplit(l, sep)[amtI] ?? ""))
-    .filter(n => !isNaN(n) && n !== 0);
-  const mixed = samples.some(n => n < 0) && samples.some(n => n > 0);
+  // ── Mixed-sign detection (for non-split single-column format) ──
+  const samples = hasSplitCols
+    ? []
+    : lines.slice(1, Math.min(10, lines.length))
+        .map(l => parseAmount(csvSplit(l, sep)[amtI] ?? ""))
+        .filter(n => !isNaN(n) && n !== 0);
+  const mixed = !hasSplitCols && samples.some(n => n < 0) && samples.some(n => n > 0);
 
   const rows: ParsedRow[] = lines.slice(1).flatMap(line => {
-    const c      = csvSplit(line, sep);
-    const signed = parseAmount(c[amtI] ?? "");
-    if (isNaN(signed) || signed === 0) return [];
+    const c = csvSplit(line, sep);
 
-    const type: "income" | "expense" = mixed
-      ? (signed > 0 ? "income" : "expense")
-      : "expense"; // credit card: all positive = all expenses
+    let amount: number;
+    let type: "income" | "expense";
 
-    const rawDesc = (descI >= 0 ? c[descI] : c.find((_, i) => i !== dateI && i !== amtI)) ?? "Transação";
+    if (hasSplitCols) {
+      const creditAmt = parseAmount(c[creditI] ?? "");
+      const debitAmt  = parseAmount(c[debitI] ?? "");
+      const hasCredit = !isNaN(creditAmt) && Math.abs(creditAmt) > 0;
+      const hasDebit  = !isNaN(debitAmt)  && Math.abs(debitAmt) > 0;
+      if (!hasCredit && !hasDebit) return [];
+      amount = hasCredit ? Math.abs(creditAmt) : Math.abs(debitAmt);
+      type   = hasCredit ? "income" : "expense";
+    } else {
+      const signed = parseAmount(c[amtI] ?? "");
+      if (isNaN(signed) || signed === 0) return [];
+      type   = mixed ? (signed > 0 ? "income" : "expense") : "expense";
+      amount = Math.abs(signed);
+    }
+
+    const rawDesc = (
+      descI >= 0
+        ? c[descI]
+        : c.find((_, i) => i !== dateI && i !== amtI && i !== creditI && i !== debitI)
+    ) ?? "Transação";
 
     return [{
       date:        parseDate(c[dateI] ?? ""),
       description: rawDesc || "Transação",
-      amount:      Math.abs(signed),
+      amount,
       type,
     }];
   });

@@ -73,24 +73,40 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
   const [dragOver, setDragOver]   = useState(false);
   const [aiAvailable, setAiAvailable] = useState(true);
   const [parseDebug, setParseDebug] = useState<ParseDebug | null>(null);
+  const [saveError, setSaveError]   = useState<string | null>(null);
+  const [schemaWarning, setSchemaWarning] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const hashSet = useMemo(() => new Set(recentHashes), [recentHashes]);
 
   /* ── file processing ── */
   function processFile(file: File) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target?.result as string;
-      const { rows: parsed, debug } = parseFile(file.name, content);
+    const applyResult = (parsed: ReturnType<typeof parseFile>) => {
       const bank = detectBank(file.name);
-      const type = guessAccountType(parsed);
+      const type = guessAccountType(parsed.rows);
       setBankName(bank);
-      setRawRows(parsed);
-      setParseDebug(debug);
+      setRawRows(parsed.rows);
+      setParseDebug(parsed.debug);
       setAccount({ type, name: suggestAccountName(bank, type) });
       setStep("account");
     };
-    reader.readAsText(file, "UTF-8");
+
+    const tryRead = (encodings: string[]) => {
+      const [enc, ...rest] = encodings;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target?.result as string;
+        const result  = parseFile(file.name, content);
+        // If garbled (replacement chars) and rows = 0, try next encoding
+        if (result.rows.length === 0 && rest.length > 0 && content.includes("�")) {
+          tryRead(rest);
+          return;
+        }
+        applyResult(result);
+      };
+      reader.readAsText(file, enc);
+    };
+
+    tryRead(["UTF-8", "ISO-8859-1"]);
   }
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -166,26 +182,61 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
     const toSave = rows.filter(r => r.selected);
     if (!toSave.length) return;
     setSaving(true);
+    setSaveError(null);
+    setSchemaWarning(false);
+
     const supabase = createClient();
-    const { error } = await supabase.from("transactions").insert(
-      toSave.map(r => ({
+
+    const fullPayload = toSave.map(r => ({
+      user_id:             userId,
+      description:         r.description,
+      amount:              r.amount,
+      type:                r.type,
+      category_id:         r.categoryId,
+      subcategory:         r.subcategory || null,
+      date:                r.date,
+      is_imported:         true,
+      is_recurring:        r.isRecurring,
+      account_type:        account.type,
+      account_name:        account.name,
+      installments:        1,
+      installment_current: 1,
+    }));
+
+    let { error } = await supabase.from("transactions").insert(fullPayload);
+
+    // If columns don't exist yet (schema not migrated), retry with only base columns
+    const isSchemaError = error && (
+      error.code === "42703" ||
+      error.code === "PGRST204" ||
+      error.message?.toLowerCase().includes("column") ||
+      error.message?.toLowerCase().includes("could not find") ||
+      error.message?.toLowerCase().includes("does not exist")
+    );
+    if (isSchemaError) {
+      setSchemaWarning(true);
+      const basePayload = toSave.map(r => ({
         user_id:             userId,
         description:         r.description,
         amount:              r.amount,
         type:                r.type,
         category_id:         r.categoryId,
-        subcategory:         r.subcategory || null,
         date:                r.date,
         is_imported:         true,
-        is_recurring:        r.isRecurring,
-        account_type:        account.type,
-        account_name:        account.name,
         installments:        1,
         installment_current: 1,
-      }))
-    );
+      }));
+      const fallback = await supabase.from("transactions").insert(basePayload);
+      error = fallback.error;
+    }
+
     setSaving(false);
-    if (!error) { setSavedCount(toSave.length); setStep("done"); }
+    if (!error) {
+      setSavedCount(toSave.length);
+      setStep("done");
+    } else {
+      setSaveError(error.message ?? "Erro ao salvar. Tente novamente.");
+    }
   }
 
   const selectedCount = rows.filter(r => r.selected).length;
@@ -602,6 +653,36 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
           </div>
         );
       })}
+
+      {/* Schema warning */}
+      {schemaWarning && (
+        <div className="rounded-2xl px-4 py-3 flex items-start gap-3"
+          style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.3)" }}>
+          <i className="fa-solid fa-triangle-exclamation text-sm flex-shrink-0 mt-0.5" style={{ color: "var(--gold)" }} />
+          <div>
+            <p className="text-xs font-semibold" style={{ color: "var(--gold)" }}>Salvo sem dados de conta</p>
+            <p className="text-[10px] mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+              Para salvar nome/tipo de conta e recorrências, execute o arquivo
+              <span className="mono-data font-semibold" style={{ color: "var(--foreground)" }}> supabase-schema-v2.sql</span> no Supabase SQL Editor.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Save error */}
+      {saveError && (
+        <div className="rounded-2xl px-4 py-3 flex items-start gap-3"
+          style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+          <i className="fa-solid fa-circle-exclamation text-sm flex-shrink-0 mt-0.5" style={{ color: "var(--expense)" }} />
+          <div className="flex-1">
+            <p className="text-xs font-semibold" style={{ color: "var(--expense)" }}>Erro ao salvar</p>
+            <p className="text-[10px] mt-0.5 break-all" style={{ color: "var(--muted-foreground)" }}>{saveError}</p>
+          </div>
+          <button onClick={() => setSaveError(null)} className="flex-shrink-0">
+            <i className="fa-solid fa-xmark text-xs" style={{ color: "var(--muted-foreground)" }} />
+          </button>
+        </div>
+      )}
 
       {/* Confirm button */}
       <div className="sticky bottom-20 py-2">

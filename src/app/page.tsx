@@ -25,20 +25,36 @@ export default async function HomePage() {
   const mStart = `${year}-${String(month).padStart(2, "0")}-01`;
   const mEnd   = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
-  const [{ data: txRows }, { data: goalRows }] = await Promise.all([
-    supabase
+  // Try with extended columns; fall back to base if schema not migrated yet
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let txRows: any[] | null = null;
+  {
+    const { data, error } = await supabase
       .from("transactions")
       .select("id,description,amount,type,category_id,date,account_type,account_name,is_recurring,subcategory")
       .eq("user_id", user.id)
       .gte("date", mStart).lt("date", mEnd)
       .order("date", { ascending: false })
-      .limit(50),
-    supabase
-      .from("goals")
-      .select("category_id,limit_amount")
-      .eq("user_id", user.id)
-      .eq("month", month).eq("year", year),
-  ]);
+      .limit(50);
+    if (!error) {
+      txRows = data;
+    } else {
+      const fallback = await supabase
+        .from("transactions")
+        .select("id,description,amount,type,category_id,date")
+        .eq("user_id", user.id)
+        .gte("date", mStart).lt("date", mEnd)
+        .order("date", { ascending: false })
+        .limit(50);
+      txRows = fallback.data;
+    }
+  }
+
+  const { data: goalRows } = await supabase
+    .from("goals")
+    .select("category_id,limit_amount")
+    .eq("user_id", user.id)
+    .eq("month", month).eq("year", year);
 
   const txList   = txRows ?? [];
   const goalList = goalRows ?? [];
