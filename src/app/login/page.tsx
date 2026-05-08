@@ -99,7 +99,6 @@ export default function LoginPage() {
                 background: "var(--input)",
                 border: "1px solid var(--border)",
                 color: "var(--foreground)",
-                ringColor: "var(--primary)",
               }}
             />
           </div>
