@@ -4,34 +4,83 @@ import BottomNav from "@/components/BottomNav";
 import BalanceCard from "@/components/BalanceCard";
 import CategoryBar from "@/components/CategoryBar";
 import TransactionList from "@/components/TransactionList";
+import { CATEGORIES } from "@/lib/categories";
 import Link from "next/link";
 
-const SAMPLE_CATEGORIES = [
-  { name: "Alimentação",  icon: "fa-utensils",       amount: 680,  limit: 800, color: "#F59E0B" },
-  { name: "Transporte",   icon: "fa-car",             amount: 320,  limit: 400, color: "#3B82F6" },
-  { name: "Assinaturas",  icon: "fa-tv",              amount: 180,  limit: 200, color: "#14B8A6" },
-  { name: "Saúde",        icon: "fa-heart-pulse",     amount: 250,  limit: 300, color: "#EC4899" },
-  { name: "Lazer",        icon: "fa-gamepad",         amount: 120,              color: "#A855F7" },
-];
-
-const SAMPLE_TRANSACTIONS = [
-  { id: "1", description: "iFood - Almoço",    amount: 38.90, type: "expense" as const, category: "alimentacao", date: new Date().toISOString() },
-  { id: "2", description: "Salário Maio",      amount: 4500,  type: "income"  as const, category: "salario",     date: new Date(Date.now() - 86400000).toISOString() },
-  { id: "3", description: "Uber - Trabalho",   amount: 24.50, type: "expense" as const, category: "transporte",  date: new Date(Date.now() - 86400000).toISOString() },
-  { id: "4", description: "Netflix",           amount: 55.90, type: "expense" as const, category: "assinaturas", date: new Date(Date.now() - 172800000).toISOString() },
-  { id: "5", description: "Freelance design",  amount: 800,   type: "income"  as const, category: "freelance",   date: new Date(Date.now() - 259200000).toISOString() },
-];
+function monthLabel(month: number, year: number) {
+  return new Date(year, month - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+}
 
 export default async function HomePage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const userName = user.user_metadata?.full_name ?? user.email ?? "você";
-  const income  = SAMPLE_TRANSACTIONS.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
-  const expense = SAMPLE_TRANSACTIONS.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const monthEnd = month === 12
+    ? `${year + 1}-01-01`
+    : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+
+  const [{ data: txRows }, { data: goalRows }] = await Promise.all([
+    supabase
+      .from("transactions")
+      .select("id,description,amount,type,category_id,date")
+      .eq("user_id", user.id)
+      .gte("date", monthStart)
+      .lt("date", monthEnd)
+      .order("date", { ascending: false })
+      .limit(50),
+    supabase
+      .from("goals")
+      .select("category_id,limit_amount")
+      .eq("user_id", user.id)
+      .eq("month", month)
+      .eq("year", year),
+  ]);
+
+  const txList = txRows ?? [];
+  const goalList = goalRows ?? [];
+
+  const income  = txList.filter(t => t.type === "income").reduce((s, t) => s + Number(t.amount), 0);
+  const expense = txList.filter(t => t.type === "expense").reduce((s, t) => s + Number(t.amount), 0);
   const balance = income - expense;
-  const totalExpense = SAMPLE_CATEGORIES.reduce((s, c) => s + c.amount, 0);
+
+  // Agrupa gastos por categoria
+  const catSpend = new Map<string, number>();
+  txList.filter(t => t.type === "expense").forEach(t => {
+    const key = t.category_id ?? "outros";
+    catSpend.set(key, (catSpend.get(key) ?? 0) + Number(t.amount));
+  });
+
+  const categorySummary = Array.from(catSpend.entries())
+    .map(([catId, amount]) => {
+      const cat = CATEGORIES.find(c => c.id === catId) ?? CATEGORIES[CATEGORIES.length - 1];
+      const goal = goalList.find(g => g.category_id === catId);
+      return { name: cat.name, icon: cat.icon, amount, limit: goal ? Number(goal.limit_amount) : undefined, color: cat.color };
+    })
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5);
+
+  const totalExpense = categorySummary.reduce((s, c) => s + c.amount, 0);
+
+  // Alerta: categoria que ultrapassou 80% do limite
+  const alertCat = categorySummary.find(c => c.limit && c.amount >= c.limit * 0.8);
+
+  const transactions = txList.slice(0, 10).map(t => ({
+    id: t.id,
+    description: t.description,
+    amount: Number(t.amount),
+    type: t.type as "income" | "expense",
+    category: t.category_id ?? "outros",
+    date: t.date,
+  }));
+
+  const userName = user.user_metadata?.full_name ?? user.email ?? "você";
+  const label = monthLabel(month, year);
 
   return (
     <main className="flex flex-col min-h-screen safe-bottom">
@@ -52,10 +101,10 @@ export default async function HomePage() {
               PINGO
             </span>
             <span
-              className="ml-2 text-xs px-2 py-0.5 rounded-full mono-data"
+              className="ml-2 text-xs px-2 py-0.5 rounded-full mono-data capitalize"
               style={{ background: "var(--input)", color: "var(--muted-foreground)" }}
             >
-              Maio 2026
+              {label}
             </span>
           </div>
         </div>
@@ -65,10 +114,12 @@ export default async function HomePage() {
             style={{ background: "var(--input)" }}
           >
             <i className="fa-solid fa-bell text-sm" style={{ color: "var(--muted-foreground)" }} />
-            <span
-              className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
-              style={{ background: "var(--expense)" }}
-            />
+            {alertCat && (
+              <span
+                className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
+                style={{ background: "var(--expense)" }}
+              />
+            )}
           </button>
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
@@ -86,19 +137,21 @@ export default async function HomePage() {
         </div>
       </header>
 
-      {/* Alerta */}
-      <div className="px-5 mb-3">
-        <div
-          className="flex items-center gap-2.5 rounded-xl px-4 py-3 animate-fade-in-up"
-          style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.2)" }}
-        >
-          <i className="fa-solid fa-triangle-exclamation animate-pulse-alert text-sm text-expense" />
-          <p className="text-xs font-medium text-expense flex-1">
-            Alimentação em 85% do limite mensal
-          </p>
-          <i className="fa-solid fa-chevron-right text-xs text-expense opacity-60" />
+      {/* Alerta de limite */}
+      {alertCat && (
+        <div className="px-5 mb-3">
+          <div
+            className="flex items-center gap-2.5 rounded-xl px-4 py-3 animate-fade-in-up"
+            style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.2)" }}
+          >
+            <i className="fa-solid fa-triangle-exclamation animate-pulse-alert text-sm text-expense" />
+            <p className="text-xs font-medium text-expense flex-1">
+              {alertCat.name} em {alertCat.limit ? Math.round((alertCat.amount / alertCat.limit) * 100) : 0}% do limite mensal
+            </p>
+            <i className="fa-solid fa-chevron-right text-xs text-expense opacity-60" />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Conteúdo scrollável */}
       <div className="flex-1 overflow-y-auto px-5 pb-4 flex flex-col gap-4">
@@ -109,7 +162,9 @@ export default async function HomePage() {
           userName={userName}
         />
 
-        <CategoryBar categories={SAMPLE_CATEGORIES} total={totalExpense} />
+        {categorySummary.length > 0 && (
+          <CategoryBar categories={categorySummary} total={totalExpense} />
+        )}
 
         {/* Ação rápida — pinga no porquinho */}
         <Link
@@ -136,7 +191,7 @@ export default async function HomePage() {
           <i className="fa-solid fa-arrow-right text-white/80" />
         </Link>
 
-        <TransactionList transactions={SAMPLE_TRANSACTIONS} />
+        <TransactionList transactions={transactions} />
       </div>
 
       <BottomNav />

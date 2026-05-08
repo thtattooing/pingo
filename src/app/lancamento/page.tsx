@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { CATEGORIES, detectCategory } from "@/lib/categories";
 import BottomNav from "@/components/BottomNav";
+import { createClient } from "@/lib/supabase/client";
 
 interface ParsedTransaction {
   description: string;
@@ -79,15 +80,53 @@ export default function LancamentoPage() {
     handleChange(label);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!parsed) return;
-    // TODO: salvar no Supabase
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const today = new Date().toISOString().split("T")[0];
+
+    if (parsed.installments && parsed.installments > 1) {
+      const totalInstallments = parsed.installments;
+      const rows = Array.from({ length: totalInstallments }, (_, idx) => {
+        const d = new Date();
+        d.setMonth(d.getMonth() + idx);
+        return {
+          user_id: user.id,
+          description: `${parsed.description || "Transação"} (${idx + 1}/${totalInstallments})`,
+          amount: +(parsed.amount / totalInstallments).toFixed(2),
+          type: parsed.type,
+          category_id: parsed.categoryId,
+          date: d.toISOString().split("T")[0],
+          installments: totalInstallments,
+          installment_current: idx + 1,
+        };
+      });
+      const { error } = await supabase.from("transactions").insert(rows);
+      if (error) { console.error(error); return; }
+    } else {
+      const { error } = await supabase.from("transactions").insert({
+        user_id: user.id,
+        description: parsed.description || "Transação",
+        amount: parsed.amount,
+        type: parsed.type,
+        category_id: parsed.categoryId,
+        date: today,
+        installments: 1,
+        installment_current: 1,
+      });
+      if (error) { console.error(error); return; }
+    }
+
     setSaved(true);
     setTimeout(() => {
       setText("");
       setParsed(null);
       setSaved(false);
       router.push("/");
+      router.refresh();
     }, 1200);
   }
 
