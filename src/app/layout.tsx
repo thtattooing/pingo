@@ -21,8 +21,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PINGO",
-  description: "Seu controle financeiro pessoal",
+  title: "PINGO 🐷",
+  description: "Cada pingo conta — Pinga no porquinho",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -36,7 +36,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#0F172A",
+  themeColor: "#F472B6",
 };
 
 export default function RootLayout({

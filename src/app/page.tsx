@@ -37,19 +37,27 @@ export default async function HomePage() {
     <main className="flex flex-col min-h-screen safe-bottom">
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-12 pb-4">
-        <div>
-          <span
-            className="text-2xl font-normal"
-            style={{ fontFamily: "var(--font-calistoga)" }}
+        <div className="flex items-center gap-2.5">
+          <div
+            className="w-9 h-9 rounded-2xl flex items-center justify-center"
+            style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", boxShadow: "0 0 12px rgba(244,114,182,0.4)" }}
           >
-            PINGO
-          </span>
-          <span
-            className="ml-2 text-xs px-2 py-0.5 rounded-full mono-data"
-            style={{ background: "var(--input)", color: "var(--muted-foreground)" }}
-          >
-            Maio 2026
-          </span>
+            <i className="fa-solid fa-piggy-bank text-white text-base" />
+          </div>
+          <div>
+            <span
+              className="text-xl font-normal leading-none"
+              style={{ fontFamily: "var(--font-calistoga)" }}
+            >
+              PINGO
+            </span>
+            <span
+              className="ml-2 text-xs px-2 py-0.5 rounded-full mono-data"
+              style={{ background: "var(--input)", color: "var(--muted-foreground)" }}
+            >
+              Maio 2026
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -103,20 +111,26 @@ export default async function HomePage() {
 
         <CategoryBar categories={SAMPLE_CATEGORIES} total={totalExpense} />
 
-        {/* Ação rápida */}
+        {/* Ação rápida — pinga no porquinho */}
         <Link
           href="/lancamento"
           className="card-pingo flex items-center gap-4 active:scale-95 transition-transform no-underline"
-          style={{ background: "linear-gradient(135deg, #1E40AF 0%, #3B82F6 100%)" }}
+          style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", border: "none" }}
         >
           <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center"
+            className="w-11 h-11 rounded-xl flex items-center justify-center relative"
             style={{ background: "rgba(255,255,255,0.15)" }}
           >
-            <i className="fa-solid fa-comment-dots text-white" />
+            <i className="fa-solid fa-piggy-bank text-white text-lg" />
+            <span
+              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
+              style={{ background: "var(--gold)", color: "#100A18" }}
+            >
+              +
+            </span>
           </div>
           <div className="flex-1">
-            <p className="font-semibold text-white text-sm">Lançar agora</p>
+            <p className="font-semibold text-white text-sm">Pingar no porquinho</p>
             <p className="text-xs text-white/70">Diga o que gastou ou recebeu</p>
           </div>
           <i className="fa-solid fa-arrow-right text-white/80" />

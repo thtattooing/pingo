@@ -45,19 +45,50 @@ export default function LoginPage() {
     <main className="min-h-screen flex flex-col items-center justify-center px-6 relative overflow-hidden">
       <div
         className="absolute inset-0 pointer-events-none"
-        style={{ background: "radial-gradient(ellipse 80% 60% at 50% 0%, rgba(30,64,175,0.35) 0%, transparent 70%)" }}
+        style={{ background: "radial-gradient(ellipse 80% 60% at 50% 0%, rgba(236,72,153,0.25) 0%, rgba(251,191,36,0.05) 60%, transparent 100%)" }}
       />
 
-      {/* Logo */}
+      {/* Logo — porquinho com moeda caindo */}
       <div className="relative z-10 flex flex-col items-center gap-4 mb-10 animate-fade-in-up">
-        <div className="w-20 h-20 rounded-3xl btn-primary flex items-center justify-center shadow-2xl">
-          <span className="text-4xl">💧</span>
+        <div className="relative">
+          {/* Moeda dourada caindo */}
+          <div
+            className="absolute -top-4 left-1/2 -translate-x-1/2 animate-coin-drop"
+            style={{ animationDelay: "0.4s", animationFillMode: "both" }}
+          >
+            <div
+              className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
+              style={{ background: "linear-gradient(135deg, #D97706, #FBBF24)", color: "#100A18", boxShadow: "0 2px 8px rgba(251,191,36,0.5)" }}
+            >
+              R$
+            </div>
+          </div>
+
+          {/* Porquinho */}
+          <div
+            className="w-24 h-24 rounded-3xl flex items-center justify-center shadow-2xl animate-gold-shine"
+            style={{ background: "linear-gradient(135deg, #EC4899 0%, #F9A8D4 50%, #F472B6 100%)" }}
+          >
+            <i className="fa-solid fa-piggy-bank text-4xl text-white drop-shadow" />
+          </div>
+
+          {/* Brilho rosa atrás */}
+          <div
+            className="absolute inset-0 rounded-3xl pointer-events-none"
+            style={{ boxShadow: "0 0 40px rgba(244,114,182,0.4)", zIndex: -1 }}
+          />
         </div>
+
         <div className="text-center">
-          <h1 className="text-5xl font-normal tracking-tight" style={{ fontFamily: "var(--font-calistoga)" }}>
+          <h1
+            className="text-5xl font-normal tracking-tight"
+            style={{ fontFamily: "var(--font-calistoga)", color: "var(--foreground)" }}
+          >
             PINGO
           </h1>
-          <p className="text-[var(--muted-foreground)] mt-1 text-sm">Cada pingo conta</p>
+          <p className="mt-1 text-sm" style={{ color: "var(--muted-foreground)" }}>
+            Cada pingo conta 🐷
+          </p>
         </div>
       </div>
 

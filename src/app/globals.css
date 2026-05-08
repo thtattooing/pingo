@@ -4,69 +4,76 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-primary: var(--primary);
+  --color-background:       var(--background);
+  --color-foreground:       var(--foreground);
+  --color-card:             var(--card);
+  --color-card-foreground:  var(--card-foreground);
+  --color-primary:          var(--primary);
   --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
+  --color-muted:            var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-income: var(--income);
-  --color-expense: var(--expense);
-  --color-surface: var(--surface);
-  --font-sans: var(--font-inter);
-  --font-display: var(--font-calistoga);
-  --font-mono: var(--font-jetbrains);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.5);
+  --color-accent:           var(--accent);
+  --color-border:           var(--border);
+  --color-input:            var(--input);
+  --color-ring:             var(--ring);
+  --color-income:           var(--income);
+  --color-expense:          var(--expense);
+  --color-gold:             var(--gold);
+  --font-sans:              var(--font-inter);
+  --font-display:           var(--font-calistoga);
+  --font-mono:              var(--font-jetbrains);
+  --radius-sm:  calc(var(--radius) * 0.6);
+  --radius-md:  calc(var(--radius) * 0.8);
+  --radius-lg:  var(--radius);
+  --radius-xl:  calc(var(--radius) * 1.5);
   --radius-2xl: calc(var(--radius) * 2);
 }
 
 :root {
-  /* PINGO — Dark Finance Theme */
-  --background:    #0F172A;
-  --foreground:    #F8FAFC;
-  --card:          #192134;
-  --card-foreground: #F8FAFC;
-  --surface:       #1E293B;
-  --primary:       #3B82F6;
+  /* ================================
+     PINGO — Identidade do Porquinho
+     Cada pingo conta 🐷💰
+     ================================ */
+
+  --background:      #100A18;   /* roxo escuro profundo */
+  --foreground:      #FDF2F8;   /* branco quente rosado */
+  --card:            #1C1126;   /* dark aubergine */
+  --card-foreground: #FDF2F8;
+  --surface:         #251432;   /* superfície ligeiramente mais clara */
+
+  --primary:         #F472B6;   /* rosa porquinho */
+  --primary-dark:    #EC4899;   /* rosa mais intenso */
   --primary-foreground: #FFFFFF;
-  --secondary:     #1E40AF;
-  --secondary-foreground: #FFFFFF;
-  --muted:         #1A1E2F;
-  --muted-foreground: #94A3B8;
-  --accent:        #3B82F6;
-  --accent-foreground: #FFFFFF;
-  --destructive:   #DC2626;
-  --income:        #059669;
-  --expense:       #DC2626;
-  --border:        rgba(255,255,255,0.08);
-  --input:         rgba(255,255,255,0.06);
-  --ring:          #3B82F6;
-  --radius:        1rem;
+
+  --gold:            #FBBF24;   /* dourado moeda */
+  --gold-light:      #FDE68A;   /* dourado claro */
+
+  --income:          #10B981;   /* verde positivo */
+  --expense:         #EF4444;   /* vermelho negativo */
+
+  --muted:           #2A1840;   /* plum escuro */
+  --muted-foreground: #B4A8C8;  /* lavanda suave */
+
+  --accent:          #FBBF24;
+  --accent-foreground: #100A18;
+
+  --border:          rgba(244, 114, 182, 0.15);  /* borda rosa sutil */
+  --input:           rgba(244, 114, 182, 0.08);  /* input rosa suave */
+  --ring:            #F472B6;
+
+  --radius: 1rem;
 
   /* Charts */
-  --chart-1: #3B82F6;
-  --chart-2: #059669;
-  --chart-3: #F59E0B;
-  --chart-4: #8B5CF6;
-  --chart-5: #EC4899;
+  --chart-1: #F472B6;
+  --chart-2: #10B981;
+  --chart-3: #FBBF24;
+  --chart-4: #A78BFA;
+  --chart-5: #60A5FA;
 }
 
 @layer base {
   * {
-    @apply border-[var(--border)] outline-[var(--ring)]/50 box-border;
+    @apply border-[var(--border)] box-border;
   }
 
   html {
@@ -82,17 +89,22 @@
     overscroll-behavior: none;
   }
 
-  /* Scrollbar customizada */
-  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar { width: 3px; height: 3px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb { background: rgba(244,114,182,0.25); border-radius: 999px; }
 }
 
 @layer utilities {
-  /* Gradiente do botão primário */
+  /* Botão primário — gradiente rosa */
   .btn-primary {
-    background: linear-gradient(135deg, #1E40AF 0%, #3B82F6 100%);
+    background: linear-gradient(135deg, #EC4899 0%, #F472B6 100%);
     @apply text-white font-semibold rounded-2xl active:scale-95 transition-transform;
+  }
+
+  /* Botão dourado — para ações de moeda/lançar */
+  .btn-gold {
+    background: linear-gradient(135deg, #D97706 0%, #FBBF24 100%);
+    @apply text-[#100A18] font-bold rounded-2xl active:scale-95 transition-transform;
   }
 
   /* Card padrão */
@@ -102,12 +114,20 @@
     @apply rounded-2xl p-5;
   }
 
-  /* Texto de saldo */
+  /* Card com brilho rosa */
+  .card-glow {
+    background-color: var(--card);
+    border: 1px solid rgba(244,114,182,0.3);
+    box-shadow: 0 0 20px rgba(244,114,182,0.08);
+    @apply rounded-2xl p-5;
+  }
+
+  /* Texto de saldo — Calistoga */
   .balance-text {
     font-family: var(--font-calistoga), serif;
   }
 
-  /* Números/dados financeiros */
+  /* Números financeiros — JetBrains Mono */
   .mono-data {
     font-family: var(--font-jetbrains), monospace;
   }
@@ -116,19 +136,34 @@
   .safe-top    { padding-top: env(safe-area-inset-top); }
   .safe-bottom { padding-bottom: calc(env(safe-area-inset-bottom) + 5rem); }
 
-  /* Positivo e negativo */
+  /* Cores semânticas */
   .text-income  { color: var(--income); }
   .text-expense { color: var(--expense); }
+  .text-gold    { color: var(--gold); }
+  .text-pig     { color: var(--primary); }
 
-  /* Glassmorphism sutil para overlays */
+  /* Glassmorphism plum */
   .glass {
-    background: rgba(15, 23, 42, 0.8);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: rgba(16, 10, 24, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  /* Badge dourado */
+  .badge-gold {
+    background: rgba(251,191,36,0.15);
+    border: 1px solid rgba(251,191,36,0.3);
+    color: var(--gold);
+    font-family: var(--font-jetbrains), monospace;
+    @apply text-xs px-2 py-0.5 rounded-full;
   }
 }
 
-/* Animate.css entrada padrão para listas */
+/* ========================
+   Animações PINGO
+   ======================== */
+
+/* Entrada de cards e listas */
 @keyframes fadeInUp-pingo {
   from { opacity: 0; transform: translateY(16px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -137,11 +172,41 @@
   animation: fadeInUp-pingo 0.35s ease both;
 }
 
-/* Pulso de alerta */
+/* Moeda caindo no porquinho */
+@keyframes coin-drop {
+  0%   { opacity: 0; transform: translateY(-20px) scale(0.6); }
+  60%  { opacity: 1; transform: translateY(4px) scale(1.1); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-coin-drop {
+  animation: coin-drop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Porquinho balançando */
+@keyframes pig-wobble {
+  0%, 100% { transform: rotate(0deg); }
+  25%       { transform: rotate(-8deg); }
+  75%       { transform: rotate(8deg); }
+}
+.animate-pig-wobble {
+  animation: pig-wobble 0.6s ease-in-out;
+}
+
+/* Pulso alerta */
 @keyframes pulse-alert {
   0%, 100% { opacity: 1; }
-  50%       { opacity: 0.5; }
+  50%       { opacity: 0.45; }
 }
 .animate-pulse-alert {
   animation: pulse-alert 1.5s ease-in-out infinite;
+}
+
+/* Brilho dourado */
+@keyframes gold-shine {
+  0%   { box-shadow: 0 0 0px rgba(251,191,36,0); }
+  50%  { box-shadow: 0 0 16px rgba(251,191,36,0.4); }
+  100% { box-shadow: 0 0 0px rgba(251,191,36,0); }
+}
+.animate-gold-shine {
+  animation: gold-shine 2s ease-in-out infinite;
 }
