@@ -1,7 +1,6 @@
 -- =============================================
--- PINGO — Schema do Banco de Dados
--- Execute este SQL no Supabase Dashboard:
--- SQL Editor → New query → Cole e execute
+-- PINGO — Schema do Banco de Dados (idempotente)
+-- Pode rodar quantas vezes quiser sem erro
 -- =============================================
 
 -- ==================
@@ -16,6 +15,10 @@ create table if not exists public.profiles (
 
 alter table public.profiles enable row level security;
 
+drop policy if exists "Usuário lê o próprio perfil"      on public.profiles;
+drop policy if exists "Usuário atualiza o próprio perfil" on public.profiles;
+drop policy if exists "Usuário insere o próprio perfil"   on public.profiles;
+
 create policy "Usuário lê o próprio perfil"
   on public.profiles for select
   using (auth.uid() = id);
@@ -28,7 +31,6 @@ create policy "Usuário insere o próprio perfil"
   on public.profiles for insert
   with check (auth.uid() = id);
 
--- Cria perfil automaticamente ao criar usuário
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -40,7 +42,8 @@ begin
     new.id,
     new.raw_app_meta_data->>'full_name',
     new.raw_user_meta_data->>'avatar_url'
-  );
+  )
+  on conflict (id) do nothing;
   return new;
 end;
 $$;
@@ -65,6 +68,9 @@ create table if not exists public.categories (
 
 alter table public.categories enable row level security;
 
+drop policy if exists "Categorias padrão visíveis a todos autenticados" on public.categories;
+drop policy if exists "Usuário gerencia suas categorias"                 on public.categories;
+
 create policy "Categorias padrão visíveis a todos autenticados"
   on public.categories for select
   using (auth.role() = 'authenticated' and (is_default = true or user_id = auth.uid()));
@@ -74,7 +80,6 @@ create policy "Usuário gerencia suas categorias"
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
--- Insere categorias padrão
 insert into public.categories (id, name, icon, color, is_default) values
   ('alimentacao',  'Alimentação',      'fa-utensils',        '#F59E0B', true),
   ('transporte',   'Transporte',       'fa-car',             '#3B82F6', true),
@@ -112,6 +117,11 @@ create table if not exists public.transactions (
 
 alter table public.transactions enable row level security;
 
+drop policy if exists "Usuário vê apenas suas transações"   on public.transactions;
+drop policy if exists "Usuário insere suas transações"      on public.transactions;
+drop policy if exists "Usuário atualiza suas transações"    on public.transactions;
+drop policy if exists "Usuário deleta suas transações"      on public.transactions;
+
 create policy "Usuário vê apenas suas transações"
   on public.transactions for select
   using (auth.uid() = user_id);
@@ -128,7 +138,6 @@ create policy "Usuário deleta suas transações"
   on public.transactions for delete
   using (auth.uid() = user_id);
 
--- Índices para performance
 create index if not exists idx_transactions_user_date
   on public.transactions(user_id, date desc);
 
@@ -151,6 +160,9 @@ create table if not exists public.goals (
 );
 
 alter table public.goals enable row level security;
+
+drop policy if exists "Usuário vê apenas suas metas"  on public.goals;
+drop policy if exists "Usuário gerencia suas metas"   on public.goals;
 
 create policy "Usuário vê apenas suas metas"
   on public.goals for select
@@ -180,6 +192,5 @@ from public.transactions
 group by user_id, year, month, category_id, type;
 
 -- =============================================
--- FIM DO SCHEMA
--- Execute e confirme sem erros antes de continuar
+-- FIM — Success. No rows returned = tudo certo
 -- =============================================
