@@ -9,6 +9,10 @@ export interface Transaction {
   type: "income" | "expense";
   category: string;
   date: string;
+  accountType?: string;
+  accountName?: string;
+  isRecurring?: boolean;
+  subcategory?: string;
 }
 
 function formatBRL(v: number) {
@@ -16,7 +20,7 @@ function formatBRL(v: number) {
 }
 
 function formatDate(dateStr: string) {
-  const d = new Date(dateStr);
+  const d = new Date(dateStr + "T12:00:00");
   const today = new Date();
   const diff = Math.floor((today.getTime() - d.getTime()) / 86400000);
   if (diff === 0) return "Hoje";
@@ -24,12 +28,29 @@ function formatDate(dateStr: string) {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
 }
 
+function AccountBadge({ type, name }: { type?: string; name?: string }) {
+  if (!name) return null;
+  const isCredit = type === "credit_card";
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full mono-data flex-shrink-0"
+      style={{
+        background: isCredit ? "rgba(244,114,182,0.12)" : "rgba(99,102,241,0.12)",
+        color:      isCredit ? "var(--primary)" : "#8B5CF6",
+      }}
+    >
+      <i className={`fa-solid ${isCredit ? "fa-credit-card" : "fa-building-columns"}`} style={{ fontSize: 8 }} />
+      {name}
+    </span>
+  );
+}
+
 export default function TransactionList({ transactions }: { transactions: Transaction[] }) {
   if (transactions.length === 0) {
     return (
       <div className="card-pingo flex flex-col items-center gap-3 py-8 text-center">
         <i className="fa-solid fa-receipt text-3xl" style={{ color: "var(--muted-foreground)" }} />
-        <p className="text-[var(--muted-foreground)] text-sm">Nenhuma transação ainda</p>
+        <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>Nenhuma transação ainda</p>
         <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
           Use o chat ou importe um extrato
         </p>
@@ -51,10 +72,7 @@ export default function TransactionList({ transactions }: { transactions: Transa
           <div
             key={tx.id}
             className="flex items-center gap-3 py-3 border-b last:border-b-0 animate-fade-in-up"
-            style={{
-              borderColor: "var(--border)",
-              animationDelay: `${i * 0.05}s`,
-            }}
+            style={{ borderColor: "var(--border)", animationDelay: `${i * 0.05}s` }}
           >
             <span
               className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -64,10 +82,21 @@ export default function TransactionList({ transactions }: { transactions: Transa
             </span>
 
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{tx.description}</p>
-              <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-                {cat.name} · {formatDate(tx.date)}
-              </p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="text-sm font-medium truncate max-w-[150px]">{tx.description}</p>
+                {tx.isRecurring && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full mono-data flex-shrink-0"
+                    style={{ background: "rgba(251,191,36,0.15)", color: "var(--gold)" }}>
+                    recorrente
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+                  {tx.subcategory ? tx.subcategory : cat.name} · {formatDate(tx.date)}
+                </p>
+                <AccountBadge type={tx.accountType} name={tx.accountName} />
+              </div>
             </div>
 
             <span

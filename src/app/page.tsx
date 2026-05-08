@@ -11,127 +11,123 @@ function monthLabel(month: number, year: number) {
   return new Date(year, month - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 }
 
+const BRL = (v: number) =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+
 export default async function HomePage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const now = new Date();
-  const month = now.getMonth() + 1;
-  const year = now.getFullYear();
-
-  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-  const monthEnd = month === 12
-    ? `${year + 1}-01-01`
-    : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const now    = new Date();
+  const month  = now.getMonth() + 1;
+  const year   = now.getFullYear();
+  const mStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const mEnd   = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
   const [{ data: txRows }, { data: goalRows }] = await Promise.all([
     supabase
       .from("transactions")
-      .select("id,description,amount,type,category_id,date")
+      .select("id,description,amount,type,category_id,date,account_type,account_name,is_recurring,subcategory")
       .eq("user_id", user.id)
-      .gte("date", monthStart)
-      .lt("date", monthEnd)
+      .gte("date", mStart).lt("date", mEnd)
       .order("date", { ascending: false })
       .limit(50),
     supabase
       .from("goals")
       .select("category_id,limit_amount")
       .eq("user_id", user.id)
-      .eq("month", month)
-      .eq("year", year),
+      .eq("month", month).eq("year", year),
   ]);
 
-  const txList = txRows ?? [];
+  const txList   = txRows ?? [];
   const goalList = goalRows ?? [];
 
   const income  = txList.filter(t => t.type === "income").reduce((s, t) => s + Number(t.amount), 0);
   const expense = txList.filter(t => t.type === "expense").reduce((s, t) => s + Number(t.amount), 0);
   const balance = income - expense;
 
-  // Agrupa gastos por categoria
+  // Category summary
   const catSpend = new Map<string, number>();
   txList.filter(t => t.type === "expense").forEach(t => {
-    const key = t.category_id ?? "outros";
-    catSpend.set(key, (catSpend.get(key) ?? 0) + Number(t.amount));
+    const k = t.category_id ?? "outros";
+    catSpend.set(k, (catSpend.get(k) ?? 0) + Number(t.amount));
   });
-
   const categorySummary = Array.from(catSpend.entries())
     .map(([catId, amount]) => {
-      const cat = CATEGORIES.find(c => c.id === catId) ?? CATEGORIES[CATEGORIES.length - 1];
+      const cat  = CATEGORIES.find(c => c.id === catId) ?? CATEGORIES[CATEGORIES.length - 1];
       const goal = goalList.find(g => g.category_id === catId);
       return { name: cat.name, icon: cat.icon, amount, limit: goal ? Number(goal.limit_amount) : undefined, color: cat.color };
     })
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 5);
-
   const totalExpense = categorySummary.reduce((s, c) => s + c.amount, 0);
-
-  // Alerta: categoria que ultrapassou 80% do limite
   const alertCat = categorySummary.find(c => c.limit && c.amount >= c.limit * 0.8);
 
+  // Account breakdown (credit card vs checking)
+  const accountMap = new Map<string, { type: string; name: string; total: number }>();
+  txList.filter(t => t.type === "expense" && t.account_name).forEach(t => {
+    const key = t.account_name!;
+    if (!accountMap.has(key)) accountMap.set(key, { type: t.account_type ?? "checking", name: key, total: 0 });
+    accountMap.get(key)!.total += Number(t.amount);
+  });
+  const accounts = Array.from(accountMap.values()).sort((a, b) => b.total - a.total);
+
+  // Recurring summary
+  const recurringTotal = txList
+    .filter(t => t.type === "expense" && t.is_recurring)
+    .reduce((s, t) => s + Number(t.amount), 0);
+
   const transactions = txList.slice(0, 10).map(t => ({
-    id: t.id,
+    id:          t.id,
     description: t.description,
-    amount: Number(t.amount),
-    type: t.type as "income" | "expense",
-    category: t.category_id ?? "outros",
-    date: t.date,
+    amount:      Number(t.amount),
+    type:        t.type as "income" | "expense",
+    category:    t.category_id ?? "outros",
+    date:        t.date,
+    accountType: t.account_type ?? undefined,
+    accountName: t.account_name ?? undefined,
+    isRecurring: t.is_recurring ?? false,
+    subcategory: t.subcategory ?? undefined,
   }));
 
   const userName = user.user_metadata?.full_name ?? user.email ?? "você";
-  const label = monthLabel(month, year);
+  const label    = monthLabel(month, year);
 
   return (
     <main className="flex flex-col min-h-screen safe-bottom">
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-12 pb-4">
         <div className="flex items-center gap-2.5">
-          <div
-            className="w-9 h-9 rounded-2xl flex items-center justify-center"
-            style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", boxShadow: "0 0 12px rgba(244,114,182,0.4)" }}
-          >
+          <div className="w-9 h-9 rounded-2xl flex items-center justify-center"
+            style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", boxShadow: "0 0 12px rgba(244,114,182,0.4)" }}>
             <i className="fa-solid fa-piggy-bank text-white text-base" />
           </div>
           <div>
-            <span
-              className="text-xl font-normal leading-none"
-              style={{ fontFamily: "var(--font-calistoga)" }}
-            >
+            <span className="text-xl font-normal leading-none" style={{ fontFamily: "var(--font-calistoga)" }}>
               PINGO
             </span>
-            <span
-              className="ml-2 text-xs px-2 py-0.5 rounded-full mono-data capitalize"
-              style={{ background: "var(--input)", color: "var(--muted-foreground)" }}
-            >
+            <span className="ml-2 text-xs px-2 py-0.5 rounded-full mono-data capitalize"
+              style={{ background: "var(--input)", color: "var(--muted-foreground)" }}>
               {label}
             </span>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            className="w-9 h-9 rounded-xl flex items-center justify-center relative"
-            style={{ background: "var(--input)" }}
-          >
+          <button className="w-9 h-9 rounded-xl flex items-center justify-center relative"
+            style={{ background: "var(--input)" }}>
             <i className="fa-solid fa-bell text-sm" style={{ color: "var(--muted-foreground)" }} />
             {alertCat && (
-              <span
-                className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
-                style={{ background: "var(--expense)" }}
-              />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: "var(--expense)" }} />
             )}
           </button>
-          <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
-            style={{ background: "var(--primary)" }}
-          >
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
+            style={{ background: "var(--primary)" }}>
             {user.user_metadata?.avatar_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={user.user_metadata.avatar_url} alt="" className="w-full h-full object-cover" />
             ) : (
-              <span className="text-sm font-semibold text-white">
-                {userName.charAt(0).toUpperCase()}
-              </span>
+              <span className="text-sm font-semibold text-white">{userName.charAt(0).toUpperCase()}</span>
             )}
           </div>
         </div>
@@ -140,10 +136,8 @@ export default async function HomePage() {
       {/* Alerta de limite */}
       {alertCat && (
         <div className="px-5 mb-3">
-          <div
-            className="flex items-center gap-2.5 rounded-xl px-4 py-3 animate-fade-in-up"
-            style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.2)" }}
-          >
+          <div className="flex items-center gap-2.5 rounded-xl px-4 py-3 animate-fade-in-up"
+            style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.2)" }}>
             <i className="fa-solid fa-triangle-exclamation animate-pulse-alert text-sm text-expense" />
             <p className="text-xs font-medium text-expense flex-1">
               {alertCat.name} em {alertCat.limit ? Math.round((alertCat.amount / alertCat.limit) * 100) : 0}% do limite mensal
@@ -153,36 +147,57 @@ export default async function HomePage() {
         </div>
       )}
 
-      {/* Conteúdo scrollável */}
       <div className="flex-1 overflow-y-auto px-5 pb-4 flex flex-col gap-4">
-        <BalanceCard
-          balance={balance}
-          income={income}
-          expense={expense}
-          userName={userName}
-        />
+        <BalanceCard balance={balance} income={income} expense={expense} userName={userName} />
+
+        {/* Breakdown por conta */}
+        {accounts.length > 0 && (
+          <div className="flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+            {accounts.map(acc => (
+              <div key={acc.name} className="flex-shrink-0 rounded-2xl px-4 py-3 min-w-[140px]"
+                style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <i className={`fa-solid ${acc.type === "credit_card" ? "fa-credit-card" : "fa-building-columns"} text-xs`}
+                    style={{ color: acc.type === "credit_card" ? "var(--primary)" : "#8B5CF6" }} />
+                  <span className="text-[10px] truncate max-w-[100px]" style={{ color: "var(--muted-foreground)" }}>
+                    {acc.name}
+                  </span>
+                </div>
+                <p className="mono-data text-sm font-semibold" style={{ color: "var(--expense)" }}>
+                  {BRL(acc.total)}
+                </p>
+              </div>
+            ))}
+
+            {/* Recorrentes summary */}
+            {recurringTotal > 0 && (
+              <div className="flex-shrink-0 rounded-2xl px-4 py-3 min-w-[140px]"
+                style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <i className="fa-solid fa-rotate text-xs" style={{ color: "var(--gold)" }} />
+                  <span className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>Recorrentes</span>
+                </div>
+                <p className="mono-data text-sm font-semibold" style={{ color: "var(--gold)" }}>
+                  {BRL(recurringTotal)}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {categorySummary.length > 0 && (
           <CategoryBar categories={categorySummary} total={totalExpense} />
         )}
 
-        {/* Ação rápida — pinga no porquinho */}
-        <Link
-          href="/lancamento"
+        {/* Quick action */}
+        <Link href="/lancamento"
           className="card-pingo flex items-center gap-4 active:scale-95 transition-transform no-underline"
-          style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", border: "none" }}
-        >
-          <div
-            className="w-11 h-11 rounded-xl flex items-center justify-center relative"
-            style={{ background: "rgba(255,255,255,0.15)" }}
-          >
+          style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", border: "none" }}>
+          <div className="w-11 h-11 rounded-xl flex items-center justify-center relative"
+            style={{ background: "rgba(255,255,255,0.15)" }}>
             <i className="fa-solid fa-piggy-bank text-white text-lg" />
-            <span
-              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
-              style={{ background: "var(--gold)", color: "#100A18" }}
-            >
-              +
-            </span>
+            <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
+              style={{ background: "var(--gold)", color: "#100A18" }}>+</span>
           </div>
           <div className="flex-1">
             <p className="font-semibold text-white text-sm">Pingar no porquinho</p>
