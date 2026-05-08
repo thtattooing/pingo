@@ -1,26 +1,147 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-income: var(--income);
+  --color-expense: var(--expense);
+  --color-surface: var(--surface);
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-calistoga);
+  --font-mono: var(--font-jetbrains);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.5);
+  --radius-2xl: calc(var(--radius) * 2);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  /* PINGO — Dark Finance Theme */
+  --background:    #0F172A;
+  --foreground:    #F8FAFC;
+  --card:          #192134;
+  --card-foreground: #F8FAFC;
+  --surface:       #1E293B;
+  --primary:       #3B82F6;
+  --primary-foreground: #FFFFFF;
+  --secondary:     #1E40AF;
+  --secondary-foreground: #FFFFFF;
+  --muted:         #1A1E2F;
+  --muted-foreground: #94A3B8;
+  --accent:        #3B82F6;
+  --accent-foreground: #FFFFFF;
+  --destructive:   #DC2626;
+  --income:        #059669;
+  --expense:       #DC2626;
+  --border:        rgba(255,255,255,0.08);
+  --input:         rgba(255,255,255,0.06);
+  --ring:          #3B82F6;
+  --radius:        1rem;
+
+  /* Charts */
+  --chart-1: #3B82F6;
+  --chart-2: #059669;
+  --chart-3: #F59E0B;
+  --chart-4: #8B5CF6;
+  --chart-5: #EC4899;
+}
+
+@layer base {
+  * {
+    @apply border-[var(--border)] outline-[var(--ring)]/50 box-border;
+  }
+
+  html {
+    @apply h-full;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-inter), system-ui, sans-serif;
+    @apply min-h-full antialiased overflow-x-hidden;
+    overscroll-behavior: none;
+  }
+
+  /* Scrollbar customizada */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 999px; }
+}
+
+@layer utilities {
+  /* Gradiente do botão primário */
+  .btn-primary {
+    background: linear-gradient(135deg, #1E40AF 0%, #3B82F6 100%);
+    @apply text-white font-semibold rounded-2xl active:scale-95 transition-transform;
+  }
+
+  /* Card padrão */
+  .card-pingo {
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    @apply rounded-2xl p-5;
+  }
+
+  /* Texto de saldo */
+  .balance-text {
+    font-family: var(--font-calistoga), serif;
+  }
+
+  /* Números/dados financeiros */
+  .mono-data {
+    font-family: var(--font-jetbrains), monospace;
+  }
+
+  /* Safe area mobile */
+  .safe-top    { padding-top: env(safe-area-inset-top); }
+  .safe-bottom { padding-bottom: calc(env(safe-area-inset-bottom) + 5rem); }
+
+  /* Positivo e negativo */
+  .text-income  { color: var(--income); }
+  .text-expense { color: var(--expense); }
+
+  /* Glassmorphism sutil para overlays */
+  .glass {
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Animate.css entrada padrão para listas */
+@keyframes fadeInUp-pingo {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up {
+  animation: fadeInUp-pingo 0.35s ease both;
+}
+
+/* Pulso de alerta */
+@keyframes pulse-alert {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+.animate-pulse-alert {
+  animation: pulse-alert 1.5s ease-in-out infinite;
 }

@@ -1,65 +1,131 @@
-import Image from "next/image";
+import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import BottomNav from "@/components/BottomNav";
+import BalanceCard from "@/components/BalanceCard";
+import CategoryBar from "@/components/CategoryBar";
+import TransactionList from "@/components/TransactionList";
+import Link from "next/link";
 
-export default function Home() {
+const SAMPLE_CATEGORIES = [
+  { name: "Alimentação",  icon: "fa-utensils",       amount: 680,  limit: 800, color: "#F59E0B" },
+  { name: "Transporte",   icon: "fa-car",             amount: 320,  limit: 400, color: "#3B82F6" },
+  { name: "Assinaturas",  icon: "fa-tv",              amount: 180,  limit: 200, color: "#14B8A6" },
+  { name: "Saúde",        icon: "fa-heart-pulse",     amount: 250,  limit: 300, color: "#EC4899" },
+  { name: "Lazer",        icon: "fa-gamepad",         amount: 120,              color: "#A855F7" },
+];
+
+const SAMPLE_TRANSACTIONS = [
+  { id: "1", description: "iFood - Almoço",    amount: 38.90, type: "expense" as const, category: "alimentacao", date: new Date().toISOString() },
+  { id: "2", description: "Salário Maio",      amount: 4500,  type: "income"  as const, category: "salario",     date: new Date(Date.now() - 86400000).toISOString() },
+  { id: "3", description: "Uber - Trabalho",   amount: 24.50, type: "expense" as const, category: "transporte",  date: new Date(Date.now() - 86400000).toISOString() },
+  { id: "4", description: "Netflix",           amount: 55.90, type: "expense" as const, category: "assinaturas", date: new Date(Date.now() - 172800000).toISOString() },
+  { id: "5", description: "Freelance design",  amount: 800,   type: "income"  as const, category: "freelance",   date: new Date(Date.now() - 259200000).toISOString() },
+];
+
+export default async function HomePage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const userName = user.user_metadata?.full_name ?? user.email ?? "você";
+  const income  = SAMPLE_TRANSACTIONS.filter(t => t.type === "income").reduce((s,t) => s + t.amount, 0);
+  const expense = SAMPLE_TRANSACTIONS.filter(t => t.type === "expense").reduce((s,t) => s + t.amount, 0);
+  const balance = income - expense;
+  const totalExpense = SAMPLE_CATEGORIES.reduce((s, c) => s + c.amount, 0);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main className="flex flex-col min-h-screen safe-bottom">
+      {/* Header */}
+      <header className="flex items-center justify-between px-5 pt-12 pb-4">
+        <div>
+          <span
+            className="text-2xl font-normal"
+            style={{ fontFamily: "var(--font-calistoga)" }}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+            PINGO
+          </span>
+          <span
+            className="ml-2 text-xs px-2 py-0.5 rounded-full mono-data"
+            style={{ background: "var(--input)", color: "var(--muted-foreground)" }}
+          >
+            Maio 2026
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            className="w-9 h-9 rounded-xl flex items-center justify-center relative"
+            style={{ background: "var(--input)" }}
+          >
+            <i className="fa-solid fa-bell text-sm" style={{ color: "var(--muted-foreground)" }} />
+            <span
+              className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
+              style={{ background: "var(--expense)" }}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+          </button>
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
+            style={{ background: "var(--primary)" }}
           >
-            Documentation
-          </a>
+            {user.user_metadata?.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={user.user_metadata.avatar_url} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-sm font-semibold text-white">
+                {userName.charAt(0).toUpperCase()}
+              </span>
+            )}
+          </div>
         </div>
-      </main>
-    </div>
+      </header>
+
+      {/* Alerta */}
+      <div className="px-5 mb-3">
+        <div
+          className="flex items-center gap-2.5 rounded-xl px-4 py-3 animate-fade-in-up"
+          style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.2)" }}
+        >
+          <i className="fa-solid fa-triangle-exclamation animate-pulse-alert text-sm text-expense" />
+          <p className="text-xs font-medium text-expense flex-1">
+            Alimentação em 85% do limite mensal
+          </p>
+          <i className="fa-solid fa-chevron-right text-xs text-expense opacity-60" />
+        </div>
+      </div>
+
+      {/* Conteúdo scrollável */}
+      <div className="flex-1 overflow-y-auto px-5 pb-4 flex flex-col gap-4">
+        <BalanceCard
+          balance={balance}
+          income={income}
+          expense={expense}
+          userName={userName}
+        />
+
+        <CategoryBar categories={SAMPLE_CATEGORIES} total={totalExpense} />
+
+        {/* Ação rápida */}
+        <Link
+          href="/lancamento"
+          className="card-pingo flex items-center gap-4 active:scale-95 transition-transform no-underline"
+          style={{ background: "linear-gradient(135deg, #1E40AF 0%, #3B82F6 100%)" }}
+        >
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center"
+            style={{ background: "rgba(255,255,255,0.15)" }}
+          >
+            <i className="fa-solid fa-comment-dots text-white" />
+          </div>
+          <div className="flex-1">
+            <p className="font-semibold text-white text-sm">Lançar agora</p>
+            <p className="text-xs text-white/70">Diga o que gastou ou recebeu</p>
+          </div>
+          <i className="fa-solid fa-arrow-right text-white/80" />
+        </Link>
+
+        <TransactionList transactions={SAMPLE_TRANSACTIONS} />
+      </div>
+
+      <BottomNav />
+    </main>
   );
 }
