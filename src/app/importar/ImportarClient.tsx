@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useMemo } from "react";
-import { parseFile, detectBank, ParsedRow } from "@/lib/parsers";
+import { parseFile, detectBank, ParsedRow, ParseDebug } from "@/lib/parsers";
 import { CATEGORIES, detectCategory } from "@/lib/categories";
 import { createClient } from "@/lib/supabase/client";
 import type { AnalyzeResult } from "@/app/api/analyze/route";
@@ -72,6 +72,7 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
   const [savedCount, setSavedCount] = useState(0);
   const [dragOver, setDragOver]   = useState(false);
   const [aiAvailable, setAiAvailable] = useState(true);
+  const [parseDebug, setParseDebug] = useState<ParseDebug | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const hashSet = useMemo(() => new Set(recentHashes), [recentHashes]);
 
@@ -80,11 +81,12 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target?.result as string;
-      const parsed  = parseFile(file.name, content);
-      const bank    = detectBank(file.name);
-      const type    = guessAccountType(parsed);
+      const { rows: parsed, debug } = parseFile(file.name, content);
+      const bank = detectBank(file.name);
+      const type = guessAccountType(parsed);
       setBankName(bank);
       setRawRows(parsed);
+      setParseDebug(debug);
       setAccount({ type, name: suggestAccountName(bank, type) });
       setStep("account");
     };
@@ -255,12 +257,71 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
           </div>
           <div>
             <p className="font-semibold text-sm">{bankName}</p>
-            <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-              {rawRows.length} transações detectadas
+            <p className="text-xs" style={{ color: rawRows.length === 0 ? "var(--expense)" : "var(--muted-foreground)" }}>
+              {rawRows.length === 0 ? "Nenhuma transação detectada" : `${rawRows.length} transações detectadas`}
             </p>
           </div>
         </div>
 
+        {/* ── DIAGNÓSTICO quando 0 linhas ── */}
+        {rawRows.length === 0 && parseDebug && (
+          <div className="flex flex-col gap-3 rounded-2xl p-4"
+            style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+            <div className="flex items-center gap-2">
+              <i className="fa-solid fa-triangle-exclamation text-sm" style={{ color: "var(--expense)" }} />
+              <p className="text-xs font-semibold" style={{ color: "var(--expense)" }}>
+                Não foi possível ler as colunas do arquivo
+              </p>
+            </div>
+
+            <div>
+              <p className="text-[10px] mb-1 font-medium" style={{ color: "var(--muted-foreground)" }}>
+                Primeiras linhas do arquivo:
+              </p>
+              <div className="rounded-xl p-3 overflow-x-auto" style={{ background: "var(--card)" }}>
+                {parseDebug.rawFirstLines.map((l, i) => (
+                  <p key={i} className="mono-data text-[10px] leading-relaxed whitespace-pre"
+                    style={{ color: i === 0 ? "var(--primary)" : "var(--foreground)" }}>
+                    {l.slice(0, 120)}{l.length > 120 ? "…" : ""}
+                  </p>
+                ))}
+              </div>
+            </div>
+
+            {parseDebug.headers.length > 1 && (
+              <div>
+                <p className="text-[10px] mb-1 font-medium" style={{ color: "var(--muted-foreground)" }}>
+                  Colunas detectadas ({parseDebug.sep}):
+                </p>
+                <div className="flex gap-1.5 flex-wrap">
+                  {parseDebug.headers.map((h, i) => (
+                    <span key={i} className="text-[9px] px-2 py-0.5 rounded-full mono-data"
+                      style={{
+                        background: (i === parseDebug.dateCol || i === parseDebug.descCol || i === parseDebug.amtCol)
+                          ? "rgba(244,114,182,0.2)" : "var(--muted)",
+                        color: (i === parseDebug.dateCol || i === parseDebug.descCol || i === parseDebug.amtCol)
+                          ? "var(--primary)" : "var(--muted-foreground)",
+                      }}>
+                      [{i}] {h}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-[9px] mt-1.5" style={{ color: "var(--muted-foreground)" }}>
+                  Data: {parseDebug.dateCol >= 0 ? `coluna ${parseDebug.dateCol} ✓` : "não encontrada ✗"}
+                  {" · "}
+                  Valor: {parseDebug.amtCol >= 0 ? `coluna ${parseDebug.amtCol} ✓` : "não encontrada ✗"}
+                </p>
+              </div>
+            )}
+
+            <p className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>
+              Cole as primeiras linhas do arquivo em uma mensagem para eu ajustar o parser.
+            </p>
+          </div>
+        )}
+
+        {rawRows.length > 0 && (
+        <>
         <p className="text-sm font-medium">Qual é este extrato?</p>
 
         {/* Account type */}
@@ -329,6 +390,8 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
           <i className="fa-solid fa-wand-magic-sparkles mr-2" />
           Analisar com IA
         </button>
+        </>
+        )}
 
         <button onClick={() => setStep("drop")} className="text-xs text-center"
           style={{ color: "var(--muted-foreground)" }}>
