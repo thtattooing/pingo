@@ -4,28 +4,43 @@ import BottomNav from "@/components/BottomNav";
 import BalanceCard from "@/components/BalanceCard";
 import CategoryBar from "@/components/CategoryBar";
 import TransactionList from "@/components/TransactionList";
+import MonthNav from "@/components/MonthNav";
 import { CATEGORIES } from "@/lib/categories";
 import Link from "next/link";
-
-function monthLabel(month: number, year: number) {
-  return new Date(year, month - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-}
 
 const BRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
-export default async function HomePage() {
+function parseMonthParam(m?: string): { month: number; year: number } {
+  const now = new Date();
+  if (m) {
+    const [y, mo] = m.split("-").map(Number);
+    if (y > 2000 && mo >= 1 && mo <= 12) return { month: mo, year: y };
+  }
+  return { month: now.getMonth() + 1, year: now.getFullYear() };
+}
+
+function monthRange(month: number, year: number) {
+  const mStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const mEnd   = month === 12
+    ? `${year + 1}-01-01`
+    : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  return { mStart, mEnd };
+}
+
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams?: { m?: string };
+}) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const now    = new Date();
-  const month  = now.getMonth() + 1;
-  const year   = now.getFullYear();
-  const mStart = `${year}-${String(month).padStart(2, "0")}-01`;
-  const mEnd   = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const { month, year } = parseMonthParam(searchParams?.m);
+  const { mStart, mEnd } = monthRange(month, year);
 
-  // Try with extended columns; fall back to base if schema not migrated yet
+  // Try with extended columns; fall back to base if schema not yet migrated
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let txRows: any[] | null = null;
   {
@@ -35,7 +50,7 @@ export default async function HomePage() {
       .eq("user_id", user.id)
       .gte("date", mStart).lt("date", mEnd)
       .order("date", { ascending: false })
-      .limit(50);
+      .limit(200);
     if (!error) {
       txRows = data;
     } else {
@@ -45,7 +60,7 @@ export default async function HomePage() {
         .eq("user_id", user.id)
         .gte("date", mStart).lt("date", mEnd)
         .order("date", { ascending: false })
-        .limit(50);
+        .limit(200);
       txRows = fallback.data;
     }
   }
@@ -63,7 +78,6 @@ export default async function HomePage() {
   const expense = txList.filter(t => t.type === "expense").reduce((s, t) => s + Number(t.amount), 0);
   const balance = income - expense;
 
-  // Category summary
   const catSpend = new Map<string, number>();
   txList.filter(t => t.type === "expense").forEach(t => {
     const k = t.category_id ?? "outros";
@@ -80,7 +94,7 @@ export default async function HomePage() {
   const totalExpense = categorySummary.reduce((s, c) => s + c.amount, 0);
   const alertCat = categorySummary.find(c => c.limit && c.amount >= c.limit * 0.8);
 
-  // Account breakdown (credit card vs checking)
+  // Account breakdown
   const accountMap = new Map<string, { type: string; name: string; total: number }>();
   txList.filter(t => t.type === "expense" && t.account_name).forEach(t => {
     const key = t.account_name!;
@@ -89,12 +103,11 @@ export default async function HomePage() {
   });
   const accounts = Array.from(accountMap.values()).sort((a, b) => b.total - a.total);
 
-  // Recurring summary
   const recurringTotal = txList
     .filter(t => t.type === "expense" && t.is_recurring)
     .reduce((s, t) => s + Number(t.amount), 0);
 
-  const transactions = txList.slice(0, 10).map(t => ({
+  const transactions = txList.slice(0, 15).map(t => ({
     id:          t.id,
     description: t.description,
     amount:      Number(t.amount),
@@ -108,7 +121,6 @@ export default async function HomePage() {
   }));
 
   const userName = user.user_metadata?.full_name ?? user.email ?? "você";
-  const label    = monthLabel(month, year);
 
   return (
     <main className="flex flex-col min-h-screen safe-bottom">
@@ -119,25 +131,14 @@ export default async function HomePage() {
             style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", boxShadow: "0 0 12px rgba(244,114,182,0.4)" }}>
             <i className="fa-solid fa-piggy-bank text-white text-base" />
           </div>
-          <div>
-            <span className="text-xl font-normal leading-none" style={{ fontFamily: "var(--font-calistoga)" }}>
-              PINGO
-            </span>
-            <span className="ml-2 text-xs px-2 py-0.5 rounded-full mono-data capitalize"
-              style={{ background: "var(--input)", color: "var(--muted-foreground)" }}>
-              {label}
-            </span>
-          </div>
+          <span className="text-xl font-normal leading-none" style={{ fontFamily: "var(--font-calistoga)" }}>
+            PINGO
+          </span>
         </div>
+
         <div className="flex items-center gap-2">
-          <button className="w-9 h-9 rounded-xl flex items-center justify-center relative"
-            style={{ background: "var(--input)" }}>
-            <i className="fa-solid fa-bell text-sm" style={{ color: "var(--muted-foreground)" }} />
-            {alertCat && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: "var(--expense)" }} />
-            )}
-          </button>
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
+          <MonthNav month={month} year={year} basePath="/" />
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden ml-1"
             style={{ background: "var(--primary)" }}>
             {user.user_metadata?.avatar_url ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -166,11 +167,12 @@ export default async function HomePage() {
       <div className="flex-1 overflow-y-auto px-5 pb-4 flex flex-col gap-4">
         <BalanceCard balance={balance} income={income} expense={expense} userName={userName} />
 
-        {/* Breakdown por conta */}
+        {/* Breakdown por conta → link para /cartoes */}
         {accounts.length > 0 && (
           <div className="flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
             {accounts.map(acc => (
-              <div key={acc.name} className="flex-shrink-0 rounded-2xl px-4 py-3 min-w-[140px]"
+              <Link key={acc.name} href={`/cartoes?m=${year}-${String(month).padStart(2,"0")}`}
+                className="flex-shrink-0 rounded-2xl px-4 py-3 min-w-[140px] no-underline"
                 style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <i className={`fa-solid ${acc.type === "credit_card" ? "fa-credit-card" : "fa-building-columns"} text-xs`}
@@ -182,10 +184,8 @@ export default async function HomePage() {
                 <p className="mono-data text-sm font-semibold" style={{ color: "var(--expense)" }}>
                   {BRL(acc.total)}
                 </p>
-              </div>
+              </Link>
             ))}
-
-            {/* Recorrentes summary */}
             {recurringTotal > 0 && (
               <div className="flex-shrink-0 rounded-2xl px-4 py-3 min-w-[140px]"
                 style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>

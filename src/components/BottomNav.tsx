@@ -4,11 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const tabs = [
-  { href: "/",           icon: "fa-house",         label: "Início" },
-  { href: "/lancamento", icon: "fa-piggy-bank",    label: "Pingar" },
+  { href: "/",           icon: "fa-house",         label: "Início"   },
+  { href: "/lancamento", icon: "fa-piggy-bank",    label: "Pingar"   },
   { href: "/importar",   icon: "fa-file-arrow-up", label: "Importar" },
-  { href: "/historico",  icon: "fa-chart-line",    label: "Histórico" },
-  { href: "/ir",         icon: "fa-file-invoice",  label: "IR" },
+  { href: "/cartoes",    icon: "fa-credit-card",   label: "Cartões"  },
+  { href: "/historico",  icon: "fa-chart-line",    label: "Histórico"},
 ];
 
 export default function BottomNav() {
@@ -21,12 +21,12 @@ export default function BottomNav() {
     >
       <div className="flex items-center justify-around h-16 px-2">
         {tabs.map((tab) => {
-          const active = path === tab.href;
+          const active = path === tab.href || (tab.href !== "/" && path.startsWith(tab.href));
           return (
             <Link
               key={tab.href}
               href={tab.href}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all active:scale-90"
+              className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all active:scale-90 relative"
               style={{ minWidth: 52 }}
             >
               <i

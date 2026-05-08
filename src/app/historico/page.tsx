@@ -232,6 +232,22 @@ export default async function HistoricoPage() {
         )}
       </div>
 
+      {/* IR link */}
+      <div className="px-5 pb-2">
+        <a href="/ir" className="flex items-center gap-3 rounded-2xl px-4 py-3 no-underline"
+          style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: "rgba(99,102,241,0.12)" }}>
+            <i className="fa-solid fa-file-invoice text-sm" style={{ color: "#6366F1" }} />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium">Declaração IR</p>
+            <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>Resumo para a Receita Federal</p>
+          </div>
+          <i className="fa-solid fa-arrow-right text-xs" style={{ color: "var(--muted-foreground)" }} />
+        </a>
+      </div>
+
       <BottomNav />
     </main>
   );
