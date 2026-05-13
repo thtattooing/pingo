@@ -143,9 +143,10 @@ function csvSplit(line: string, sep: string): string[] {
 // ─────────────────────────────────────────── parseAmount
 function parseAmount(s: string): number {
   if (!s) return NaN;
-  let v = s.replace(/[R$\s"']/g, "").trim();
-  if (!v || v === "-") return NaN;
-  // BRL: 1.234,56  or  1234,56
+  // Strip currency symbols and common prefixes (R$, $, US$, USD, EUR, €, £)
+  let v = s.replace(/[R$€£\s"']/g, "").replace(/^(USD?|EUR?)\s*/i, "").trim();
+  if (!v || v === "-" || v === "--") return NaN;
+  // BRL: 1.234,56  or  1234,56 (comma is decimal separator)
   if (/\d,\d{1,2}$/.test(v)) return parseFloat(v.replace(/\./g, "").replace(",", "."));
   // US/ISO: 1,234.56 or 1234.56
   return parseFloat(v.replace(/,/g, ""));

@@ -1,48 +1,57 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
+import MonthNav from "@/components/MonthNav";
 import CartoesClient from "./CartoesClient";
+
+function parseMonthParam(m?: string): { month: number; year: number } {
+  const now = new Date();
+  if (m) {
+    const [y, mo] = m.split("-").map(Number);
+    if (y > 2000 && mo >= 1 && mo <= 12) return { month: mo, year: y };
+  }
+  return { month: now.getMonth() + 1, year: now.getFullYear() };
+}
 
 export default async function CartoesPage({
   searchParams,
 }: {
-  searchParams?: { settings?: string };
+  searchParams?: { settings?: string; m?: string };
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const now    = new Date();
-  const mStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-  const mEnd   = now.getMonth() === 11
-    ? `${now.getFullYear() + 1}-01-01`
-    : `${now.getFullYear()}-${String(now.getMonth() + 2).padStart(2, "0")}-01`;
+  const { month, year } = parseMonthParam(searchParams?.m);
 
-  // Next month for preview
-  const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const nextMEnd      = new Date(now.getFullYear(), now.getMonth() + 2, 1);
-  const nextStart     = nextMonthDate.toISOString().split("T")[0];
-  const nextEnd       = nextMEnd.toISOString().split("T")[0];
+  const mStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const mEnd   = month === 12
+    ? `${year + 1}-01-01`
+    : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+
+  // Next month preview (always month+1 of selected)
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear  = month === 12 ? year + 1 : year;
+  const nextStart = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+  const nextEnd   = nextMonth === 12
+    ? `${nextYear + 1}-01-01`
+    : `${nextYear}-${String(nextMonth + 1).padStart(2, "0")}-01`;
 
   const [{ data: curTx }, { data: nextTx }, { data: settingsRows }] = await Promise.all([
-    // Current month transactions
     supabase.from("transactions")
       .select("account_name,account_type,amount,type")
       .eq("user_id", user.id)
       .gte("date", mStart).lt("date", mEnd),
-    // Next month (future installments already scheduled)
     supabase.from("transactions")
       .select("account_name,amount,type")
       .eq("user_id", user.id)
       .gte("date", nextStart).lt("date", nextEnd)
       .eq("type" as never, "expense"),
-    // Card settings
     supabase.from("card_settings")
       .select("account_name,credit_limit,due_day,closing_day,color")
       .eq("user_id", user.id),
   ]);
 
-  // Build card map
   type CardData = {
     name: string;
     type: string;
@@ -91,27 +100,29 @@ export default async function CartoesPage({
   const cards = Array.from(cardMap.values())
     .sort((a, b) => b.currentFatura - a.currentFatura);
 
-  // settings card to open
   const openSettings = searchParams?.settings
     ? decodeURIComponent(searchParams.settings)
     : null;
 
   return (
     <main className="flex flex-col min-h-screen safe-bottom">
-      <header className="px-5 pt-12 pb-4">
-        <h1 className="text-2xl font-normal" style={{ fontFamily: "var(--font-calistoga)" }}>
-          Cartões &amp; Contas
-        </h1>
-        <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-          Toque em um cartão para ver os detalhes
-        </p>
+      <header className="px-5 pt-12 pb-4 flex flex-col gap-3">
+        <div>
+          <h1 className="text-2xl font-normal" style={{ fontFamily: "var(--font-calistoga)" }}>
+            Cartões &amp; Contas
+          </h1>
+          <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+            Toque em um cartão para ver os detalhes
+          </p>
+        </div>
+        <MonthNav month={month} year={year} basePath="/cartoes" />
       </header>
 
       <div className="flex-1 overflow-y-auto pb-4">
         <CartoesClient
           cards={cards}
-          month={now.getMonth() + 1}
-          year={now.getFullYear()}
+          month={month}
+          year={year}
           openSettings={openSettings}
         />
       </div>
