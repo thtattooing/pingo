@@ -224,6 +224,10 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
     "debito", "credito", "saida", "entrada", "mov.", "moviment",
   );
 
+  // Currency column — C6/Inter/Nubank export international transactions as
+  // separate BRL and USD rows with a "Moeda" / "Coin" column
+  const currencyColI = fi("moeda", "currency", "coin", "curr.");
+
   // Nubank v2: "type" column with values "transaction" / "payment"
   const nuTypeI = fi("type");
   const dataRows = lines.slice(headerLine + 1, Math.min(headerLine + 8, lines.length)).map(l => csvSplit(l, sep));
@@ -248,6 +252,35 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
       const parsed = vals.map(v => parseAmount(v));
       const valid  = parsed.filter(n => !isNaN(n));
       if (valid.length > 0 && valid.length >= vals.length * 0.5) { amtI = col; break; }
+    }
+  }
+
+  // ── BRL vs USD column disambiguation ─────────────────────────────────────
+  // C6/Inter/Nubank credit cards export "Valor (R$)" and "Valor (USD)" as
+  // separate columns. fi("valor") may pick the USD column first if it appears
+  // before the BRL column in the header. Fix: always prefer the BRL column.
+  if (!hasSplitCols) {
+    const usdColIdx = hdr.findIndex(h => {
+      const nh = deaccent(h.trim());
+      return (nh.includes("usd") || nh.includes("dolar") || nh.includes("dollar") || nh.includes("us$"))
+          && !nh.includes("brl") && !nh.includes("r$") && !nh.includes("real") && !nh.includes("reais");
+    });
+    const brlColIdx = hdr.findIndex(h => {
+      const nh = deaccent(h.trim());
+      return (nh.includes("r$") || nh.includes("brl") || nh.includes("real") || nh.includes("reais"))
+          && !nh.includes("usd") && !nh.includes("dolar") && !nh.includes("dollar");
+    });
+    if (brlColIdx >= 0) {
+      // Explicit BRL column found — always prefer it
+      amtI = brlColIdx;
+    } else if (usdColIdx >= 0 && amtI === usdColIdx) {
+      // amtI is pointing at the USD column — look for the next "valor"-like column
+      const altIdx = hdr.findIndex((h, i) => {
+        if (i === usdColIdx || i === dateI || i === descI) return false;
+        const nh = deaccent(h.trim());
+        return ["valor", "amount", "quantia", "montante", "vlr"].some(t => nh.includes(t));
+      });
+      if (altIdx >= 0) amtI = altIdx;
     }
   }
 
@@ -279,6 +312,13 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
     if (isNubankV2) {
       const txType = (c[nuTypeI] ?? "").toLowerCase().trim();
       if (txType === "payment" || txType === "pagamento") return [];
+    }
+
+    // Skip foreign-currency rows — C6/Inter export intl purchases as two rows
+    // (one BRL, one USD). Keep only BRL rows.
+    if (currencyColI >= 0) {
+      const curr = (c[currencyColI] ?? "").toLowerCase().trim();
+      if (curr && curr !== "brl" && curr !== "r$" && !curr.startsWith("br")) return [];
     }
 
     let amount: number;
