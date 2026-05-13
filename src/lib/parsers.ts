@@ -91,23 +91,41 @@ export interface ParseDebug {
   rowsParsed: number;
 }
 
+// ─────────────────────────────────────────── deaccent
+function deaccent(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+
 // ─────────────────────────────────────────── parseDate
 function parseDate(raw: string): string {
-  const s = raw.trim()
-    .replace(/\[.*?\]/g, "")   // OFX timezone [...]
-    .replace(/T.*$/,      "")   // ISO datetime T...
-    .replace(/\s.*/,      "")   // trailing time
-    .trim();
+  // Remove OFX timezone [...] and trim
+  const s = raw.trim().replace(/\[.*?\]/g, "").trim();
 
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);       // YYYY-MM-DD
+  // YYYY-MM-DD (ISO, with optional time suffix)
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
 
-  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,"0")}-${dmy[1].padStart(2,"0")}`; // DD/MM/YYYY
-
+  // YYYYMMDD or YYYYMMDDHHMMSS (OFX)
   const yyyymmdd = s.match(/^(\d{4})(\d{2})(\d{2})/);
-  if (yyyymmdd) return `${yyyymmdd[1]}-${yyyymmdd[2]}-${yyyymmdd[3]}`;             // YYYYMMDD (OFX)
+  if (yyyymmdd) return `${yyyymmdd[1]}-${yyyymmdd[2]}-${yyyymmdd[3]}`;
 
-  return s.slice(0, 10);
+  // DD/MM/YYYY or DD-MM-YYYY (may have time after)
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,"0")}-${dmy[1].padStart(2,"0")}`;
+
+  // DD MMM YYYY  e.g. "01 jan 2024", "01 Jan 2024", "01 janeiro 2024"
+  const dmonthY = s.match(/^(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?\s+(\d{4})/i);
+  if (dmonthY) {
+    const MM: Record<string, string> = {
+      jan:"01",fev:"02",feb:"02",mar:"03",abr:"04",apr:"04",
+      mai:"05",may:"05",jun:"06",jul:"07",ago:"08",aug:"08",
+      set:"09",sep:"09",out:"10",oct:"10",nov:"11",dez:"12",dec:"12",
+    };
+    const mm = MM[dmonthY[2].toLowerCase().slice(0, 3)] ?? "01";
+    return `${dmonthY[3]}-${mm}-${dmonthY[1].padStart(2,"0")}`;
+  }
+
+  // Fallback: strip trailing time/space
+  return s.replace(/[\sT].*/, "").slice(0, 10);
 }
 
 // ─────────────────────────────────────────── csvSplit
@@ -138,8 +156,9 @@ function looksLikeDate(v: string): boolean {
   const s = v.trim();
   return (
     /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}/.test(s) ||
-    /^\d{4}[\/\-]\d{2}[\/\-]\d{2}/.test(s) ||
-    /^\d{8,14}$/.test(s.replace(/\s/g, ""))
+    /^\d{4}[\/\-]\d{2}[\/\-]\d{2}/.test(s)      ||
+    /^\d{8,14}$/.test(s.replace(/\s/g, ""))       ||
+    /^\d{1,2}\s+[A-Za-z]{3}[a-z]*\.?\s+\d{4}/i.test(s)  // DD MMM YYYY
   );
 }
 
@@ -150,42 +169,63 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
 
   const emptyDebug = (msg = ""): { rows: ParsedRow[]; debug: ParseDebug } => ({
     rows: [],
-    debug: { rawFirstLines: lines.slice(0, 4), sep: "", headers: [msg], dateCol: -1, descCol: -1, amtCol: -1, rowsParsed: 0 },
+    debug: { rawFirstLines: lines.slice(0, 6), sep: "", headers: [msg], dateCol: -1, descCol: -1, amtCol: -1, rowsParsed: 0 },
   });
 
   if (lines.length < 2) return emptyDebug("menos de 2 linhas");
 
-  const sep = lines[0].includes(";") ? ";" : lines[0].includes("\t") ? "\t" : ",";
-  const hdr = csvSplit(lines[0].toLowerCase().trim(), sep);
+  // ── Detect separator from the line with the most separators ──────────────
+  const detectSep = (line: string) =>
+    line.includes(";") ? ";" : line.includes("\t") ? "\t" : ",";
+  const sep = detectSep(lines.slice(0, 5).sort((a, b) => b.length - a.length)[0]);
 
+  // ── Find actual header row (skip metadata / account-info preamble) ────────
+  // C6, Bradesco, some Inter exports have 1-5 metadata lines before the header
+  const HEADER_SIGNALS = [
+    "data","date","lancamento","historico","valor","debito","credito",
+    "amount","descri","transac","movimento","hist","periodo","competencia",
+  ];
+  let headerLine = 0;
+  for (let i = 0; i < Math.min(10, lines.length - 1); i++) {
+    const norm = deaccent(lines[i]).toLowerCase();
+    if (HEADER_SIGNALS.some(sig => norm.includes(sig))) {
+      headerLine = i;
+      break;
+    }
+  }
+
+  const hdr = csvSplit(lines[headerLine].toLowerCase().trim(), sep);
+
+  // fi: find column index — ignores accents in both header and search terms
   const fi = (...terms: string[]) =>
-    hdr.findIndex(h => terms.some(t => h.trim().includes(t)));
+    hdr.findIndex(h => {
+      const nh = deaccent(h.trim());
+      return terms.some(t => nh.includes(deaccent(t)));
+    });
 
-  // ── Header detection ──────────────────────────────────────────────────────
-  // NOTE: "lançamento" alone means DESCRIPTION in most banks (C6, Bradesco).
-  // The DATE column almost always contains "data" or "date".
+  // ── Column detection ──────────────────────────────────────────────────────
   let dateI = fi(
-    "data", "date", "dt ", "dt.", "vencimento", "competência", "competencia", "período", "periodo",
+    "data", "date", "dt ", "dt.", "vencimento", "competencia", "periodo",
   );
   let descI = fi(
-    "descri", "título", "titulo", "title", "histórico", "historico", "histor",
-    "lancamento", "lançamento", "memo", "estabelecimento", "transaç", "transac",
-    "detalhe", "referência", "referencia", "nome", "operação", "operac", "narrativa",
+    "descri", "titulo", "title", "historico", "histor",
+    "lancamento", "memo", "estabelecimento", "transac",
+    "detalhe", "referencia", "nome", "operac", "narrativa",
   );
 
-  // Split debit/credit columns (Itaú, Bradesco, Santander style)
-  const creditI = fi("crédit", "credit", "entrada");
-  const debitI  = fi("débito", "debito", "saída", "saida");
+  // Split debit/credit columns (Itaú, Bradesco, Inter, Santander)
+  const creditI = fi("credito", "credit", "entrada");
+  const debitI  = fi("debito", "saida", "saida");
   const hasSplitCols = creditI >= 0 && debitI >= 0 && creditI !== debitI;
 
   let amtI = hasSplitCols ? -1 : fi(
     "valor", "amount", "quantia", "montante", "vlr", "vl.",
-    "débito", "debito", "crédit", "credit", "saída", "saida", "entrada", "mov.", "moviment",
+    "debito", "credito", "saida", "entrada", "mov.", "moviment",
   );
 
   // Nubank v2: "type" column with values "transaction" / "payment"
   const nuTypeI = fi("type");
-  const dataRows = lines.slice(1, Math.min(7, lines.length)).map(l => csvSplit(l, sep));
+  const dataRows = lines.slice(headerLine + 1, Math.min(headerLine + 8, lines.length)).map(l => csvSplit(l, sep));
   const sampleTypes = dataRows.map(r => (r[nuTypeI] ?? "").toLowerCase().trim()).filter(Boolean);
   const isNubankV2  = nuTypeI >= 0 && sampleTypes.length > 0 &&
     sampleTypes.every(v => ["transaction","payment","refund","credit_card_cashback","pix","international"].includes(v));
@@ -211,7 +251,7 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
   }
 
   const debug: ParseDebug = {
-    rawFirstLines: lines.slice(0, 4),
+    rawFirstLines: lines.slice(0, 6),
     sep,
     headers: hdr,
     dateCol: dateI,
@@ -225,13 +265,13 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
   // ── Mixed-sign detection ──────────────────────────────────────────────────
   const samples = hasSplitCols || isNubankV2
     ? []
-    : lines.slice(1, Math.min(10, lines.length))
+    : lines.slice(headerLine + 1, Math.min(headerLine + 10, lines.length))
         .map(l => parseAmount(csvSplit(l, sep)[amtI] ?? ""))
         .filter(n => !isNaN(n) && n !== 0);
   const mixed = !hasSplitCols && !isNubankV2 && samples.some(n => n < 0) && samples.some(n => n > 0);
 
   // ── Row processing ────────────────────────────────────────────────────────
-  const rows: ParsedRow[] = lines.slice(1).flatMap(line => {
+  const rows: ParsedRow[] = lines.slice(headerLine + 1).flatMap(line => {
     const c = csvSplit(line, sep);
 
     // Nubank v2: skip payment rows (they are bill payments, not expenses)
