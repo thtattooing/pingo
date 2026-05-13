@@ -5,11 +5,10 @@ import BalanceCard from "@/components/BalanceCard";
 import CategoryBar from "@/components/CategoryBar";
 import TransactionList from "@/components/TransactionList";
 import MonthNav from "@/components/MonthNav";
+import ThemeToggle from "@/components/ThemeToggle";
 import { CATEGORIES } from "@/lib/categories";
 import Link from "next/link";
-
-const BRL = (v: number) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+import { BRL } from "@/lib/formatters";
 
 function parseMonthParam(m?: string): { month: number; year: number } {
   const now = new Date();
@@ -46,7 +45,7 @@ export default async function HomePage({
   {
     const { data, error } = await supabase
       .from("transactions")
-      .select("id,description,amount,type,category_id,date,account_type,account_name,is_recurring,subcategory")
+      .select("id,description,amount,type,category_id,date,account_type,account_name,is_recurring,subcategory,tx_type")
       .eq("user_id", user.id)
       .gte("date", mStart).lt("date", mEnd)
       .order("date", { ascending: false })
@@ -74,8 +73,9 @@ export default async function HomePage({
   const txList   = txRows ?? [];
   const goalList = goalRows ?? [];
 
-  const income  = txList.filter(t => t.type === "income").reduce((s, t) => s + Number(t.amount), 0);
-  const expense = txList.filter(t => t.type === "expense").reduce((s, t) => s + Number(t.amount), 0);
+  // Exclude transfer_internal to prevent double counting when paying credit card from checking
+  const income  = txList.filter(t => t.type === "income"  && t.tx_type !== "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
+  const expense = txList.filter(t => t.type === "expense" && t.tx_type !== "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
   const balance = income - expense;
 
   const catSpend = new Map<string, number>();
@@ -108,16 +108,19 @@ export default async function HomePage({
     .reduce((s, t) => s + Number(t.amount), 0);
 
   const transactions = txList.slice(0, 15).map(t => ({
-    id:          t.id,
-    description: t.description,
-    amount:      Number(t.amount),
-    type:        t.type as "income" | "expense",
-    category:    t.category_id ?? "outros",
-    date:        t.date,
-    accountType: t.account_type ?? undefined,
-    accountName: t.account_name ?? undefined,
-    isRecurring: t.is_recurring ?? false,
-    subcategory: t.subcategory ?? undefined,
+    id:                 t.id,
+    description:        t.description,
+    amount:             Number(t.amount),
+    type:               t.type as "income" | "expense",
+    category:           t.category_id ?? "outros",
+    date:               t.date,
+    accountType:        t.account_type ?? undefined,
+    accountName:        t.account_name ?? undefined,
+    isRecurring:        t.is_recurring ?? false,
+    subcategory:        t.subcategory ?? undefined,
+    installments:       t.installments ?? undefined,
+    installmentCurrent: t.installment_current ?? undefined,
+    isShared:           t.is_shared ?? false,
   }));
 
   const userName = user.user_metadata?.full_name ?? user.email ?? "você";
@@ -138,7 +141,12 @@ export default async function HomePage({
 
         <div className="flex items-center gap-2">
           <MonthNav month={month} year={year} basePath="/" />
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden ml-1"
+          <ThemeToggle />
+          <Link href="/chat" className="w-9 h-9 rounded-xl flex items-center justify-center no-underline"
+            style={{ background: "var(--input)" }}>
+            <i className="fa-solid fa-comment-dots text-sm" style={{ color: "var(--primary)" }} />
+          </Link>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
             style={{ background: "var(--primary)" }}>
             {user.user_metadata?.avatar_url ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -223,6 +231,14 @@ export default async function HomePage({
         </Link>
 
         <TransactionList transactions={transactions} />
+
+        {/* Ver todas */}
+        <Link href={`/transacoes?m=${year}-${String(month).padStart(2,"0")}`}
+          className="flex items-center justify-center gap-2 py-3 rounded-2xl text-sm no-underline transition-all"
+          style={{ color: "var(--muted-foreground)", border: "1px solid var(--border)" }}>
+          <i className="fa-solid fa-list text-xs" />
+          Ver todas as transações
+        </Link>
       </div>
 
       <BottomNav />

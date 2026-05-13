@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Calistoga, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -50,7 +51,11 @@ export default function RootLayout({
       <head>
         <link rel="stylesheet" href="/fontawesome/css/all.min.css" />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <ThemeProvider>
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }

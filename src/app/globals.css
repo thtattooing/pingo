@@ -71,6 +71,29 @@
   --chart-5: #60A5FA;
 }
 
+/* Light theme overrides */
+.light {
+  --background:      #F8F4FF;
+  --foreground:      #1A0A2E;
+  --card:            #FFFFFF;
+  --card-foreground: #1A0A2E;
+  --surface:         #F0E8FF;
+  --primary:         #EC4899;
+  --primary-dark:    #DB2777;
+  --primary-foreground: #FFFFFF;
+  --gold:            #D97706;
+  --gold-light:      #FDE68A;
+  --income:          #059669;
+  --expense:         #DC2626;
+  --muted:           #E8E0F0;
+  --muted-foreground: #6B5A7E;
+  --accent:          #D97706;
+  --accent-foreground: #F8F4FF;
+  --border:          rgba(236, 72, 153, 0.15);
+  --input:           rgba(236, 72, 153, 0.06);
+  --ring:            #EC4899;
+}
+
 @layer base {
   * {
     @apply border-[var(--border)] box-border;

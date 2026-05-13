@@ -90,32 +90,35 @@ export default function LancamentoPage() {
 
     if (parsed.installments && parsed.installments > 1) {
       const totalInstallments = parsed.installments;
+      const groupId = crypto.randomUUID();
       const rows = Array.from({ length: totalInstallments }, (_, idx) => {
         const d = new Date();
         d.setMonth(d.getMonth() + idx);
         return {
-          user_id: user.id,
-          description: `${parsed.description || "Transação"} (${idx + 1}/${totalInstallments})`,
-          amount: +(parsed.amount / totalInstallments).toFixed(2),
-          type: parsed.type,
-          category_id: parsed.categoryId,
-          date: d.toISOString().split("T")[0],
-          installments: totalInstallments,
-          installment_current: idx + 1,
+          user_id:               user.id,
+          description:           `${parsed.description || "Transação"} (${idx + 1}/${totalInstallments})`,
+          amount:                +(parsed.amount / totalInstallments).toFixed(2),
+          type:                  parsed.type,
+          category_id:           parsed.categoryId,
+          date:                  d.toISOString().split("T")[0],
+          installments:          totalInstallments,
+          installment_current:   idx + 1,
+          installment_group_id:  groupId,
         };
       });
       const { error } = await supabase.from("transactions").insert(rows);
       if (error) { console.error(error); return; }
     } else {
       const { error } = await supabase.from("transactions").insert({
-        user_id: user.id,
-        description: parsed.description || "Transação",
-        amount: parsed.amount,
-        type: parsed.type,
-        category_id: parsed.categoryId,
-        date: today,
-        installments: 1,
-        installment_current: 1,
+        user_id:               user.id,
+        description:           parsed.description || "Transação",
+        amount:                parsed.amount,
+        type:                  parsed.type,
+        category_id:           parsed.categoryId,
+        date:                  today,
+        installments:          1,
+        installment_current:   1,
+        installment_group_id:  null,
       });
       if (error) { console.error(error); return; }
     }

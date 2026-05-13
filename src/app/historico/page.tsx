@@ -3,11 +3,7 @@ import { redirect } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
 import GoalEditor, { GoalRow } from "@/components/GoalEditor";
 import { CATEGORIES } from "@/lib/categories";
-
-const BRL = (v: number) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
-
-const MONTH_NAMES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+import { BRL, MONTH_NAMES } from "@/lib/formatters";
 
 interface MonthEntry {
   key: string;
@@ -72,9 +68,10 @@ export default async function HistoricoPage() {
   const maxVal = Math.max(...months.flatMap(m => [m.income, m.expense]), 1);
 
   // Build goals for GoalEditor (categories with spend this month)
+  // Also fetch descriptions for subscription detection
   const { data: txThisMonth } = await supabase
     .from("transactions")
-    .select("category_id, amount")
+    .select("category_id, amount, description, is_recurring")
     .eq("user_id", user.id)
     .eq("type" as never, "expense")
     .gte("date", `${curYear}-${String(curMonth).padStart(2, "0")}-01`)
@@ -112,6 +109,19 @@ export default async function HistoricoPage() {
   }
   const expDiff = diffPct(totalExpense, prevExpense);
   const incDiff = diffPct(totalIncome, prevIncome);
+
+  // Subscription detector — recurring + assinaturas category
+  const SUBSCRIPTION_KEYWORDS = ["netflix","spotify","amazon","prime","disney","apple","google","youtube","hbo","globo","deezer","twitch","github","openai","chatgpt","dropbox","adobe","canva","notion","linear","figma"];
+  const subscriptions = (txThisMonth ?? []).filter(t => {
+    const desc = (t.description ?? "").toLowerCase();
+    return t.category_id === "assinaturas" || t.is_recurring ||
+      SUBSCRIPTION_KEYWORDS.some(k => desc.includes(k));
+  });
+  const subscriptionTotal = subscriptions.reduce((s, t) => s + Number(t.amount), 0);
+
+  // Best and worst months
+  const bestMonth  = [...months].sort((a, b) => (b.income - b.expense) - (a.income - a.expense))[0];
+  const worstMonth = [...months].sort((a, b) => (a.income - a.expense) - (b.income - b.expense))[0];
 
   return (
     <main className="flex flex-col min-h-screen safe-bottom">
@@ -207,6 +217,57 @@ export default async function HistoricoPage() {
             <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>
               Nenhum dado ainda. Lance transações ou importe um extrato.
             </p>
+          </div>
+        )}
+
+        {/* Monthly insights */}
+        {months.length >= 2 && (
+          <div className="card-pingo flex flex-col gap-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--muted-foreground)" }}>
+              Análise histórica
+            </h3>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-xl p-3" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.15)" }}>
+                <p className="text-[10px] mb-1" style={{ color: "var(--muted-foreground)" }}>Melhor mês</p>
+                <p className="text-xs font-semibold" style={{ color: "var(--income)" }}>{bestMonth?.label}</p>
+                <p className="text-xs mono-data" style={{ color: "var(--income)" }}>
+                  {bestMonth ? `+${BRL(bestMonth.income - bestMonth.expense)}` : "—"}
+                </p>
+              </div>
+              <div className="rounded-xl p-3" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.15)" }}>
+                <p className="text-[10px] mb-1" style={{ color: "var(--muted-foreground)" }}>Mês mais apertado</p>
+                <p className="text-xs font-semibold" style={{ color: "var(--expense)" }}>{worstMonth?.label}</p>
+                <p className="text-xs mono-data" style={{ color: "var(--expense)" }}>
+                  {worstMonth ? BRL(worstMonth.income - worstMonth.expense) : "—"}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Subscription detector */}
+        {subscriptions.length > 0 && (
+          <div className="card-pingo flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--muted-foreground)" }}>
+                Assinaturas detectadas
+              </h3>
+              <span className="mono-data text-xs font-semibold" style={{ color: "var(--expense)" }}>
+                {BRL(subscriptionTotal)}/mês
+              </span>
+            </div>
+            {subscriptions.slice(0, 6).map((t, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                  style={{ background: "rgba(20,184,166,0.12)" }}>
+                  <i className="fa-solid fa-tv text-xs" style={{ color: "#14B8A6" }} />
+                </div>
+                <span className="text-xs flex-1 truncate">{t.description}</span>
+                <span className="text-xs mono-data flex-shrink-0" style={{ color: "var(--expense)" }}>
+                  {BRL(Number(t.amount))}
+                </span>
+              </div>
+            ))}
           </div>
         )}
 

@@ -1,8 +1,84 @@
+export type TxType =
+  | "pix_in" | "pix_out"
+  | "debit"  | "credit"
+  | "transfer_in" | "transfer_out" | "transfer_internal"
+  | "boleto" | "fee" | "salary" | "deposit" | "withdrawal"
+  | "unknown";
+
 export interface ParsedRow {
   date: string;        // YYYY-MM-DD
   description: string;
   amount: number;      // always positive
   type: "income" | "expense";
+  txType?:              TxType;   // classified transaction type
+  installmentTotal?:    number;   // total installments detected (e.g. 12)
+  installmentCurrent?:  number;   // current installment (e.g. 2)
+  installmentGroupKey?: string;   // cleaned description for grouping same-purchase rows
+}
+
+/** Classify transaction type from description + income/expense */
+export function detectTxType(description: string, type: "income" | "expense"): TxType {
+  const d = description.toLowerCase();
+
+  // Transfer between own accounts — highest priority, prevents double counting
+  if (
+    /transfer[eê]ncia\s+entre\s+(contas?|conta)\s*(pr[oó]pria|pr[oó]prio)?/i.test(d) ||
+    /\bpix\b.{0,30}\bvoc[eê]\b.{0,10}\bmesmo\b/i.test(d) ||
+    /\bpago\s+por\s+voc[eê]\s+mesmo\b/i.test(d) ||
+    /\benvio\s+para\s+voc[eê]\b/i.test(d)
+  ) return "transfer_internal";
+
+  // PIX
+  if (/\bpix\b/i.test(d)) return type === "income" ? "pix_in" : "pix_out";
+
+  // Salary
+  if (/\b(sal[aá]rio|holerite|folha\s+de\s+pagamento|pagto?\s+sal[aá]rio)\b/i.test(d)) return "salary";
+
+  // Transfer (TED / DOC / Transferência)
+  if (/\b(transfer[eê]ncia|transf\.?\b|ted\b|doc\b)\b/i.test(d)) {
+    return type === "income" ? "transfer_in" : "transfer_out";
+  }
+
+  // Boleto / bill / card payment
+  if (
+    /\b(boleto|bolet\.)\b/i.test(d) ||
+    /pagamento\s+(?:de\s+)?(?:fatura|cart[aã]o|conta)/i.test(d) ||
+    /pgto\s+(?:fat|cart)/i.test(d) ||
+    /d[eé]bito\s+autom[aá]tico/i.test(d)
+  ) return "boleto";
+
+  // Bank fee / charge
+  if (/\b(tarifa|taxa\s+|anuidade|iof|servi[cç]o\s+banc[aá]rio|tarifa\s+manut)\b/i.test(d)) return "fee";
+
+  // Withdrawal
+  if (type === "expense" && /\b(saque|retirada|caixa\s+eletr[oô]nico|atm\b)\b/i.test(d)) return "withdrawal";
+
+  // Deposit
+  if (type === "income" && /\b(dep[oó]sito|crédito\s+em\s+conta|cr[eé]dito\s+em\s+c\/c)\b/i.test(d)) return "deposit";
+
+  return type === "income" ? "credit" : "debit";
+}
+
+/** Detect "2/12" style installment suffix in description */
+export function extractInstallment(desc: string): {
+  clean: string;
+  total: number | null;
+  current: number | null;
+} {
+  // Matches: " - 2/12", "(2/12)", " 2/12", "parc 2/12"
+  const m = desc.match(/[\s\-\(](?:parc(?:ela)?\s*)?(\d{1,2})\s*\/\s*(\d{1,3})[\s\)]*$/i);
+  if (m) {
+    const current = parseInt(m[1]);
+    const total   = parseInt(m[2]);
+    if (total > 1 && total <= 72 && current >= 1 && current <= total) {
+      return {
+        clean:   desc.slice(0, m.index).replace(/[-\s]+$/, "").trim(),
+        total,
+        current,
+      };
+    }
+  }
+  return { clean: desc, total: null, current: null };
 }
 
 export interface ParseDebug {
@@ -194,11 +270,18 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
         : c.find((_, i) => !excludeCols.has(i))
     ) ?? "Transação";
 
+    const raw = rawDesc || "Transação";
+    const { clean, total, current } = extractInstallment(raw);
+
     return [{
-      date:        parseDate(c[dateI] ?? ""),
-      description: rawDesc || "Transação",
+      date:                 parseDate(c[dateI] ?? ""),
+      description:          clean,
       amount,
       type,
+      txType:               detectTxType(clean, type),
+      installmentTotal:     total   ?? undefined,
+      installmentCurrent:   current ?? undefined,
+      installmentGroupKey:  total && current ? clean : undefined,
     }];
   });
 
@@ -234,11 +317,18 @@ export function parseOFX(content: string): { rows: ParsedRow[]; debug: ParseDebu
     if (!dt || !amt) return [];
     const signed = parseFloat(amt.replace(",", "."));
     if (isNaN(signed) || signed === 0) return [];
+    const rawMemo = memo.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+    const { clean, total, current } = extractInstallment(rawMemo);
+    const rowType = (ttype.toUpperCase() === "CREDIT" || signed > 0 ? "income" : "expense") as "income" | "expense";
     return [{
-      date:        parseDate(dt),
-      description: memo.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"),
-      amount:      Math.abs(signed),
-      type:        (ttype.toUpperCase() === "CREDIT" || signed > 0 ? "income" : "expense") as "income" | "expense",
+      date:                 parseDate(dt),
+      description:          clean,
+      amount:               Math.abs(signed),
+      type:                 rowType,
+      txType:               detectTxType(clean, rowType),
+      installmentTotal:     total   ?? undefined,
+      installmentCurrent:   current ?? undefined,
+      installmentGroupKey:  total && current ? clean : undefined,
     }];
   });
 

@@ -1,189 +1,174 @@
 "use client";
 
 import { useState } from "react";
-import { CATEGORIES } from "@/lib/categories";
-import MonthNav from "@/components/MonthNav";
+import { useRouter } from "next/navigation";
+import { BRL, MONTH_NAMES } from "@/lib/formatters";
+import CardSettingsSheet from "./CardSettingsSheet";
+import AddToCardModal from "./AddToCardModal";
 
-interface Tx {
-  id: string;
-  description: string;
-  amount: number;
+interface CardData {
+  name: string;
   type: string;
-  category_id?: string | null;
-  date: string;
-  account_name?: string | null;
-  account_type?: string | null;
-  subcategory?: string | null;
-  is_recurring?: boolean | null;
+  currentFatura: number;
+  currentCreditos: number;
+  nextFatura: number;
+  creditLimit: number;
+  dueDay: number;
+  closingDay: number;
+  color: string;
 }
 
 interface Props {
-  creditCards: { name: string; transactions: Tx[] }[];
-  checking:    { name: string; transactions: Tx[] }[];
+  cards: CardData[];
   month: number;
   year: number;
-  schemaReady: boolean;
+  openSettings: string | null;
 }
 
-const BRL = (v: number) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+function VisualCard({ card, month }: { card: CardData; month: number }) {
+  const router            = useRouter();
+  const [showSettings, setShowSettings] = useState(false);
+  const [showAdd, setShowAdd]           = useState(false);
+  const isCredit  = card.type === "credit_card";
+  const gradBg    = `linear-gradient(135deg, ${card.color}bb 0%, ${card.color} 100%)`;
+  const utilPct   = card.creditLimit > 0 ? Math.min((card.currentFatura / card.creditLimit) * 100, 100) : 0;
+  const overLimit = card.creditLimit > 0 && utilPct > 80;
 
-function formatDate(d: string) {
-  return new Date(d + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
-}
-
-function TxRow({ tx }: { tx: Tx }) {
-  const cat = CATEGORIES.find(c => c.id === (tx.category_id ?? "outros")) ?? CATEGORIES[CATEGORIES.length - 1];
-  const isIncome = tx.type === "income";
-  return (
-    <div className="flex items-center gap-3 py-2.5 border-b last:border-b-0"
-      style={{ borderColor: "var(--border)" }}>
-      <span className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-        style={{ background: `${cat.color}20` }}>
-        <i className={`fa-solid ${cat.icon} text-xs`} style={{ color: cat.color }} />
-      </span>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium truncate">{tx.description}</p>
-        <p className="text-[10px] mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-          {tx.subcategory ?? cat.name} · {formatDate(tx.date)}
-          {tx.is_recurring && (
-            <span className="ml-1 px-1 py-0 rounded text-[8px]"
-              style={{ background: "rgba(251,191,36,0.15)", color: "var(--gold)" }}>recorrente</span>
-          )}
-        </p>
-      </div>
-      <span className="mono-data text-xs font-semibold flex-shrink-0"
-        style={{ color: isIncome ? "var(--income)" : "var(--expense)" }}>
-        {isIncome ? "+" : "-"}{BRL(tx.amount)}
-      </span>
-    </div>
-  );
-}
-
-function CardSection({
-  name,
-  transactions,
-  isCredit,
-}: {
-  name: string;
-  transactions: Tx[];
-  isCredit: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const total   = transactions.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-  const income  = transactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const balance = income - total;
-
-  const accent  = isCredit ? "var(--primary)" : "#8B5CF6";
-  const icon    = isCredit ? "fa-credit-card" : "fa-building-columns";
-  const gradBg  = isCredit
-    ? "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)"
-    : "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)";
+  // Days until due
+  const today    = new Date();
+  const dueThisMonth = card.dueDay > 0
+    ? new Date(today.getFullYear(), today.getMonth(), card.dueDay)
+    : null;
+  if (dueThisMonth && dueThisMonth < today) dueThisMonth?.setMonth(dueThisMonth.getMonth() + 1);
+  const daysLeft = dueThisMonth
+    ? Math.ceil((dueThisMonth.getTime() - today.getTime()) / 86400000)
+    : null;
 
   return (
-    <div className="card-pingo flex flex-col gap-0 overflow-hidden p-0">
-      {/* Card header */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-3 p-4 w-full text-left active:opacity-70"
-      >
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: gradBg }}>
-          <i className={`fa-solid ${icon} text-white text-sm`} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-sm truncate">{name}</p>
-          <p className="text-[11px] mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-            {transactions.length} transaç{transactions.length === 1 ? "ão" : "ões"}
-          </p>
-        </div>
-        <div className="text-right flex-shrink-0 mr-1">
-          {isCredit ? (
-            <p className="mono-data text-sm font-semibold" style={{ color: "var(--expense)" }}>
-              {BRL(total)}
-            </p>
-          ) : (
-            <p className="mono-data text-sm font-semibold"
-              style={{ color: balance >= 0 ? "var(--income)" : "var(--expense)" }}>
-              {balance >= 0 ? "+" : ""}{BRL(balance)}
-            </p>
-          )}
-          <p className="text-[9px] mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-            {isCredit ? "fatura" : "saldo"}
-          </p>
-        </div>
-        <i className={`fa-solid ${open ? "fa-chevron-up" : "fa-chevron-down"} text-xs flex-shrink-0`}
-          style={{ color: accent }} />
-      </button>
+    <>
+      <div className="relative mx-5 rounded-3xl overflow-hidden animate-fade-in-up"
+        style={{ background: gradBg, minHeight: 170, boxShadow: `0 8px 32px ${card.color}40` }}>
+        {/* Background glow */}
+        <div className="absolute inset-0 opacity-15"
+          style={{ background: "radial-gradient(ellipse at 80% 20%, #fff 0%, transparent 60%)" }} />
 
-      {/* Bill total bar (credit cards only) */}
-      {isCredit && (
-        <div className="px-4 pb-3 flex items-center gap-3">
-          <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--muted)" }}>
-            <div className="h-full rounded-full transition-all"
-              style={{ background: gradBg, width: "100%" }} />
-          </div>
-          <span className="text-[10px] font-semibold flex-shrink-0" style={{ color: "var(--expense)" }}>
-            Fatura: {BRL(total)}
-          </span>
-        </div>
-      )}
+        {/* Settings gear */}
+        <button
+          onClick={e => { e.stopPropagation(); setShowSettings(true); }}
+          className="absolute top-4 right-4 w-8 h-8 rounded-xl flex items-center justify-center z-10"
+          style={{ background: "rgba(255,255,255,0.15)" }}>
+          <i className="fa-solid fa-gear text-white text-xs" />
+        </button>
 
-      {/* Transactions (expandable) */}
-      {open && (
-        <div className="px-4 pb-3 border-t" style={{ borderColor: "var(--border)" }}>
-          <div className="pt-2">
-            {transactions.length === 0 ? (
-              <p className="text-xs text-center py-4" style={{ color: "var(--muted-foreground)" }}>
-                Nenhuma transação neste mês
+        {/* Card content (tap to open detail) */}
+        <button className="w-full p-5 text-left active:opacity-80"
+          onClick={() => router.push(`/cartoes/${encodeURIComponent(card.name)}?m=${year}-${String(month).padStart(2,"0")}`)}>
+
+          <div className="flex items-start justify-between mb-5">
+            <div>
+              <p className="text-white/70 text-[10px] font-semibold uppercase tracking-widest mb-0.5">
+                {isCredit ? "Crédito" : "Conta"}
               </p>
-            ) : (
-              transactions.map(tx => <TxRow key={tx.id} tx={tx} />)
-            )}
+              <p className="text-white font-bold text-base leading-tight">{card.name}</p>
+            </div>
+            <i className={`fa-solid ${isCredit ? "fa-credit-card" : "fa-building-columns"} text-white/40 text-2xl`} />
           </div>
-        </div>
+
+          <div className="flex items-end justify-between mb-3">
+            <div>
+              <p className="text-white/60 text-[10px] mb-0.5">Fatura {MONTH_NAMES[month - 1]}</p>
+              <p className="text-white text-2xl font-bold mono-data">{BRL(card.currentFatura)}</p>
+            </div>
+            <div className="text-right">
+              {daysLeft !== null ? (
+                <div>
+                  <p className="text-white/60 text-[10px] mb-0.5">
+                    {daysLeft <= 0 ? "Venceu hoje" : `Vence em ${daysLeft}d`}
+                  </p>
+                  <p className="text-white text-sm font-semibold mono-data">dia {card.dueDay}</p>
+                </div>
+              ) : card.nextFatura > 0 ? (
+                <div>
+                  <p className="text-white/60 text-[10px] mb-0.5">Próxima fatura</p>
+                  <p className="text-white text-sm font-semibold mono-data">{BRL(card.nextFatura)}</p>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Utilization bar */}
+          {card.creditLimit > 0 ? (
+            <div>
+              <div className="h-1.5 rounded-full overflow-hidden mb-1" style={{ background: "rgba(255,255,255,0.2)" }}>
+                <div className="h-full rounded-full transition-all"
+                  style={{ width: `${utilPct}%`, background: overLimit ? "#ef4444" : "rgba(255,255,255,0.8)" }} />
+              </div>
+              <div className="flex justify-between">
+                <p className="text-white/50 text-[10px] mono-data">{Math.round(utilPct)}% usado</p>
+                <p className="text-white/50 text-[10px] mono-data">Limite {BRL(card.creditLimit)}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="h-1.5 rounded-full" style={{ background: "rgba(255,255,255,0.15)" }} />
+          )}
+        </button>
+
+        {/* Quick add button */}
+        <button
+          onClick={e => { e.stopPropagation(); setShowAdd(true); }}
+          className="absolute bottom-4 right-4 w-8 h-8 rounded-xl flex items-center justify-center z-10"
+          style={{ background: "rgba(255,255,255,0.2)" }}>
+          <i className="fa-solid fa-plus text-white text-xs" />
+        </button>
+      </div>
+
+      {showSettings && (
+        <CardSettingsSheet
+          accountName={card.name}
+          existing={{ account_name: card.name, credit_limit: card.creditLimit, due_day: card.dueDay, color: card.color, closing_day: card.closingDay }}
+          onClose={() => setShowSettings(false)}
+          onSaved={() => window.location.reload()}
+        />
       )}
-    </div>
+
+      {showAdd && (
+        <AddToCardModal
+          cardName={card.name}
+          cardType={card.type}
+          onClose={() => setShowAdd(false)}
+          onSaved={() => window.location.reload()}
+        />
+      )}
+    </>
   );
 }
 
-export default function CartoesClient({ creditCards, checking, month, year, schemaReady }: Props) {
-  const totalFatura = creditCards.reduce((s, card) =>
-    s + card.transactions.filter(t => t.type === "expense").reduce((ss, t) => ss + t.amount, 0), 0);
+// Dummy year variable for router push — need to pass from props
+let year = new Date().getFullYear();
 
-  if (!schemaReady) {
-    return (
-      <div className="flex flex-col gap-4">
-        <MonthNav month={month} year={year} basePath="/cartoes" />
-        <div className="card-pingo flex flex-col items-center gap-4 py-10 text-center">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
-            style={{ background: "rgba(251,191,36,0.1)" }}>
-            <i className="fa-solid fa-database text-2xl" style={{ color: "var(--gold)" }} />
-          </div>
-          <div>
-            <p className="font-semibold text-sm">Atualização necessária</p>
-            <p className="text-xs mt-1 max-w-[260px]" style={{ color: "var(--muted-foreground)" }}>
-              Execute o arquivo <span className="mono-data font-semibold" style={{ color: "var(--foreground)" }}>supabase-schema-v2.sql</span> no SQL Editor do Supabase para ativar a separação por cartão.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+export default function CartoesClient({ cards, month, year: y, openSettings }: Props) {
+  year = y;
+  const [settingsCard, setSettingsCard] = useState<string | null>(openSettings);
 
-  if (creditCards.length === 0 && checking.length === 0) {
+  // Total fatura all credit cards
+  const totalFatura = cards.filter(c => c.type === "credit_card").reduce((s, c) => s + c.currentFatura, 0);
+  const totalNext   = cards.filter(c => c.type === "credit_card").reduce((s, c) => s + c.nextFatura, 0);
+
+  const creditCards = cards.filter(c => c.type === "credit_card");
+  const checking    = cards.filter(c => c.type !== "credit_card");
+
+  if (cards.length === 0) {
     return (
-      <div className="flex flex-col gap-4">
-        <MonthNav month={month} year={year} basePath="/cartoes" />
-        <div className="card-pingo flex flex-col items-center gap-4 py-10 text-center">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+      <div className="px-5">
+        <div className="card-pingo flex flex-col items-center gap-4 py-14 text-center">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
             style={{ background: "rgba(244,114,182,0.1)" }}>
-            <i className="fa-solid fa-credit-card text-2xl" style={{ color: "var(--primary)" }} />
+            <i className="fa-solid fa-credit-card text-3xl" style={{ color: "var(--primary)" }} />
           </div>
           <div>
-            <p className="font-semibold text-sm">Nenhuma conta neste mês</p>
-            <p className="text-xs mt-1" style={{ color: "var(--muted-foreground)" }}>
-              Importe um extrato para ver as faturas aqui.
+            <p className="font-semibold">Nenhum cartão ainda</p>
+            <p className="text-sm mt-1 max-w-[240px]" style={{ color: "var(--muted-foreground)" }}>
+              Importe um extrato de cartão de crédito para começar
             </p>
           </div>
         </div>
@@ -193,44 +178,61 @@ export default function CartoesClient({ creditCards, checking, month, year, sche
 
   return (
     <div className="flex flex-col gap-4">
-      <MonthNav month={month} year={year} basePath="/cartoes" />
-
-      {/* Credit cards section */}
+      {/* Summary banner */}
       {creditCards.length > 0 && (
-        <>
-          <div className="flex items-center justify-between px-1">
-            <p className="text-xs font-semibold uppercase tracking-wider"
-              style={{ color: "var(--muted-foreground)" }}>
-              Cartões de crédito
+        <div className="mx-5 grid grid-cols-2 gap-3">
+          <div className="rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>
+              Total faturas {MONTH_NAMES[month - 1]}
             </p>
-            {creditCards.length > 1 && (
-              <p className="mono-data text-xs font-semibold" style={{ color: "var(--expense)" }}>
-                Total: {BRL(totalFatura)}
-              </p>
-            )}
+            <p className="mono-data text-base font-bold" style={{ color: "var(--expense)" }}>{BRL(totalFatura)}</p>
           </div>
-          {creditCards.map(card => (
-            <CardSection key={card.name} name={card.name} transactions={card.transactions} isCredit />
-          ))}
-        </>
+          <div className="rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Próximo mês</p>
+            <p className="mono-data text-base font-bold" style={{ color: totalNext > totalFatura ? "var(--expense)" : "var(--muted-foreground)" }}>
+              {BRL(totalNext)}
+            </p>
+          </div>
+        </div>
       )}
 
-      {/* Checking accounts section */}
+      {/* Credit cards */}
+      {creditCards.length > 0 && (
+        <div className="flex flex-col gap-4">
+          {creditCards.length > 1 && (
+            <p className="text-xs font-semibold uppercase tracking-wider px-5" style={{ color: "var(--muted-foreground)" }}>
+              Cartões de crédito
+            </p>
+          )}
+          {creditCards.map(card => (
+            <VisualCard key={card.name} card={card} month={month} />
+          ))}
+        </div>
+      )}
+
+      {/* Checking accounts */}
       {checking.length > 0 && (
-        <>
-          <p className="text-xs font-semibold uppercase tracking-wider px-1 mt-2"
-            style={{ color: "var(--muted-foreground)" }}>
+        <div className="flex flex-col gap-4">
+          <p className="text-xs font-semibold uppercase tracking-wider px-5 mt-2" style={{ color: "var(--muted-foreground)" }}>
             Contas correntes
           </p>
-          {checking.map(acc => (
-            <CardSection key={acc.name} name={acc.name} transactions={acc.transactions} isCredit={false} />
+          {checking.map(card => (
+            <VisualCard key={card.name} card={card} month={month} />
           ))}
-        </>
+        </div>
       )}
 
       <p className="text-[10px] text-center pb-2" style={{ color: "var(--muted-foreground)" }}>
-        Toque em um cartão para ver as transações
+        Toque no cartão para ver detalhes · ⚙ para configurar · + para adicionar compra
       </p>
+
+      {settingsCard && (
+        <CardSettingsSheet
+          accountName={settingsCard}
+          onClose={() => setSettingsCard(null)}
+          onSaved={() => { setSettingsCard(null); window.location.reload(); }}
+        />
+      )}
     </div>
   );
 }

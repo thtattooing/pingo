@@ -11,6 +11,29 @@
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ],
+  "shortcuts": [
+    {
+      "name": "Pingar",
+      "short_name": "Pingar",
+      "description": "Lançar transação",
+      "url": "/lancamento",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Importar",
+      "short_name": "Importar",
+      "description": "Importar extrato",
+      "url": "/importar",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Histórico",
+      "short_name": "Histórico",
+      "description": "Ver histórico",
+      "url": "/historico",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
   "categories": ["finance", "productivity"],
   "lang": "pt-BR"
 }

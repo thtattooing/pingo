@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useCallback, useRef, useMemo } from "react";
-import { parseFile, detectBank, ParsedRow, ParseDebug } from "@/lib/parsers";
+import { parseFile, detectBank, detectTxType, ParsedRow, ParseDebug } from "@/lib/parsers";
 import { CATEGORIES, detectCategory } from "@/lib/categories";
 import { createClient } from "@/lib/supabase/client";
 import type { AnalyzeResult } from "@/app/api/analyze/route";
 
 /* ─────────────────────────────────────────── types */
-type Step = "drop" | "account" | "analyzing" | "preview" | "done";
+type Step = "drop" | "paste" | "account" | "analyzing" | "preview" | "done";
 type AccountType = "credit_card" | "checking";
 
 interface AccountInfo {
@@ -23,6 +23,7 @@ interface ImportRow extends ParsedRow {
   isDupe: boolean;
   isRecurring: boolean;
   shouldExclude: boolean;
+  // installmentTotal, installmentCurrent, installmentGroupKey inherited from ParsedRow
 }
 
 interface Props {
@@ -75,8 +76,40 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
   const [parseDebug, setParseDebug] = useState<ParseDebug | null>(null);
   const [saveError, setSaveError]   = useState<string | null>(null);
   const [schemaWarning, setSchemaWarning] = useState(false);
+  const [pasteText, setPasteText]   = useState("");
+  const [pasteLoading, setPasteLoading] = useState(false);
+  const [pasteError, setPasteError]    = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const hashSet = useMemo(() => new Set(recentHashes), [recentHashes]);
+
+  /* ── text paste processing ── */
+  async function handlePasteAnalyze() {
+    if (!pasteText.trim()) return;
+    setPasteLoading(true);
+    setPasteError(null);
+    try {
+      const res = await fetch("/api/parse-statement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: pasteText }),
+      });
+      const { rows: parsed, error } = await res.json() as { rows: ParsedRow[]; error?: string };
+      if (error === "no_key" || !parsed?.length) {
+        setPasteError("Não consegui extrair transações. Verifique o texto e tente novamente.");
+        setPasteLoading(false);
+        return;
+      }
+      setBankName("Extrato colado");
+      setRawRows(parsed);
+      setParseDebug(null);
+      const type = guessAccountType(parsed);
+      setAccount({ type, name: suggestAccountName("Extrato colado", type) });
+      setStep("account");
+    } catch {
+      setPasteError("Erro ao processar. Tente novamente.");
+    }
+    setPasteLoading(false);
+  }
 
   /* ── file processing ── */
   function processFile(file: File) {
@@ -151,8 +184,8 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
         uid:          `${i}-${r.date}-${r.amount}`,
         categoryId:   ai?.category ?? detectCategory(r.description),
         subcategory:  ai?.subcategory ?? "",
-        selected:     !excluded && !hashSet.has(`${r.date}-${r.amount}`),
-        isDupe:       hashSet.has(`${r.date}-${r.amount}`),
+        selected:     !excluded && !hashSet.has(`${r.date}-${Number(r.amount).toFixed(2)}-${r.description.slice(0,15).toLowerCase().replace(/[^a-z0-9]/g,"")}`),
+        isDupe:       hashSet.has(`${r.date}-${Number(r.amount).toFixed(2)}-${r.description.slice(0,15).toLowerCase().replace(/[^a-z0-9]/g,"")}`),
         isRecurring:  Boolean(ai?.isRecurring),
         shouldExclude: excluded,
       };
@@ -187,20 +220,31 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
 
     const supabase = createClient();
 
+    // Build installment group IDs: same installmentGroupKey + same amount → same group
+    const groupIdMap = new Map<string, string>();
+    const getGroupId = (r: ImportRow): string | null => {
+      if (!r.installmentGroupKey) return null;
+      const key = `${r.installmentGroupKey}::${r.amount}`;
+      if (!groupIdMap.has(key)) groupIdMap.set(key, crypto.randomUUID());
+      return groupIdMap.get(key)!;
+    };
+
     const fullPayload = toSave.map(r => ({
-      user_id:             userId,
-      description:         r.description,
-      amount:              r.amount,
-      type:                r.type,
-      category_id:         r.categoryId,
-      subcategory:         r.subcategory || null,
-      date:                r.date,
-      is_imported:         true,
-      is_recurring:        r.isRecurring,
-      account_type:        account.type,
-      account_name:        account.name,
-      installments:        1,
-      installment_current: 1,
+      user_id:               userId,
+      description:           r.description,
+      amount:                r.amount,
+      type:                  r.type,
+      category_id:           r.categoryId,
+      subcategory:           r.subcategory || null,
+      date:                  r.date,
+      is_imported:           true,
+      is_recurring:          r.isRecurring,
+      account_type:          account.type,
+      account_name:          account.name,
+      tx_type:               r.txType ?? detectTxType(r.description, r.type),
+      installments:          r.installmentTotal          ?? 1,
+      installment_current:   r.installmentCurrent        ?? 1,
+      installment_group_id:  getGroupId(r),
     }));
 
     let { error } = await supabase.from("transactions").insert(fullPayload);
@@ -274,6 +318,24 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
         </div>
       </div>
 
+      {/* Text paste option */}
+      <button
+        onClick={e => { e.stopPropagation(); setStep("paste"); }}
+        className="flex items-center gap-3 rounded-2xl px-4 py-4 text-left transition-all"
+        style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+        <span className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: "rgba(99,102,241,0.1)" }}>
+          <i className="fa-solid fa-paste text-lg" style={{ color: "#6366F1" }} />
+        </span>
+        <div className="flex-1">
+          <p className="text-sm font-semibold">Colar texto do extrato</p>
+          <p className="text-[11px] mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+            Cole o texto copiado do app do banco — a IA extrai as transações
+          </p>
+        </div>
+        <i className="fa-solid fa-chevron-right text-xs" style={{ color: "var(--muted-foreground)" }} />
+      </button>
+
       <div className="card-pingo flex flex-col gap-4">
         <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--muted-foreground)" }}>
           Como exportar do seu banco
@@ -293,6 +355,63 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+
+  /* PASTE */
+  if (step === "paste") return (
+    <div className="flex flex-col gap-4 animate-fade-in-up">
+      <div className="card-pingo flex flex-col gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)" }}>
+            <i className="fa-solid fa-paste text-white" />
+          </div>
+          <div>
+            <p className="font-semibold text-sm">Colar texto do extrato</p>
+            <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+              A IA identifica as transações automaticamente
+            </p>
+          </div>
+        </div>
+
+        <textarea
+          value={pasteText}
+          onChange={e => setPasteText(e.target.value)}
+          placeholder={"Cole aqui o texto do extrato...\n\nEx:\n12/04 PIX recebido João Silva R$ 150,00\n13/04 Supermercado Extra R$ 87,50\n14/04 Salário R$ 3.500,00"}
+          rows={10}
+          className="w-full rounded-xl p-3 text-sm outline-none resize-none"
+          style={{
+            background: "var(--input)",
+            border:     "1px solid var(--border)",
+            color:      "var(--foreground)",
+            fontFamily: "monospace",
+          }}
+        />
+
+        {pasteError && (
+          <div className="flex items-start gap-2 rounded-xl px-3 py-2.5"
+            style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+            <i className="fa-solid fa-circle-exclamation text-sm flex-shrink-0" style={{ color: "var(--expense)" }} />
+            <p className="text-xs" style={{ color: "var(--expense)" }}>{pasteError}</p>
+          </div>
+        )}
+
+        <button
+          onClick={handlePasteAnalyze}
+          disabled={pasteLoading || !pasteText.trim()}
+          className="w-full py-4 rounded-2xl font-semibold text-sm btn-primary disabled:opacity-40">
+          {pasteLoading
+            ? <><i className="fa-solid fa-spinner fa-spin mr-2" />Extraindo transações…</>
+            : <><i className="fa-solid fa-wand-magic-sparkles mr-2" />Analisar texto com IA</>}
+        </button>
+
+        <button onClick={() => { setStep("drop"); setPasteText(""); setPasteError(null); }}
+          className="text-xs text-center"
+          style={{ color: "var(--muted-foreground)" }}>
+          ← Voltar para arquivos
+        </button>
       </div>
     </div>
   );

@@ -14,11 +14,13 @@ export default async function ImportarPage() {
 
   const { data: recent } = await supabase
     .from("transactions")
-    .select("date, amount")
+    .select("date, amount, description")
     .eq("user_id", user.id)
     .gte("date", since.toISOString().split("T")[0]);
 
-  const recentHashes = (recent ?? []).map(t => `${t.date}-${t.amount}`);
+  const recentHashes = (recent ?? []).map(t =>
+    `${t.date}-${Number(t.amount).toFixed(2)}-${String(t.description ?? "").slice(0, 15).toLowerCase().replace(/[^a-z0-9]/g, "")}`
+  );
 
   return (
     <main className="flex flex-col min-h-screen safe-bottom">
