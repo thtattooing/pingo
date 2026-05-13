@@ -3,15 +3,7 @@ import { redirect } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
 import MonthNav from "@/components/MonthNav";
 import CartoesClient from "./CartoesClient";
-
-function parseMonthParam(m?: string): { month: number; year: number } {
-  const now = new Date();
-  if (m) {
-    const [y, mo] = m.split("-").map(Number);
-    if (y > 2000 && mo >= 1 && mo <= 12) return { month: mo, year: y };
-  }
-  return { month: now.getMonth() + 1, year: now.getFullYear() };
-}
+import { parseMonthParam } from "@/lib/month-utils";
 
 export default async function CartoesPage({
   searchParams,

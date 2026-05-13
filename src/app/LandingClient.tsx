@@ -165,15 +165,33 @@ function SectionLabel({ color = "var(--primary)", children }: { color?: string; 
 export default function LandingClient() {
   const [scrolled, setScrolled]     = useState(false);
   const [openFaq, setOpenFaq]       = useState<number | null>(null);
+  const [accountDeleted, setAccountDeleted] = useState(false);
 
   useEffect(() => {
     const h = () => setScrolled(window.scrollY > 24);
     window.addEventListener("scroll", h, { passive: true });
+    // Show confirmation if redirected after account deletion
+    if (typeof window !== "undefined" && window.location.search.includes("deleted=1")) {
+      setAccountDeleted(true);
+      window.history.replaceState({}, "", "/");
+    }
     return () => window.removeEventListener("scroll", h);
   }, []);
 
   return (
     <div className="min-h-screen" style={{ background: "var(--background)", color: "var(--foreground)" }}>
+
+      {/* Conta excluída — feedback */}
+      {accountDeleted && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-lg"
+          style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.4)", color: "var(--income)" }}>
+          <i className="fa-solid fa-circle-check" />
+          <span className="text-sm font-medium">Conta excluída com sucesso.</span>
+          <button onClick={() => setAccountDeleted(false)} className="ml-2 opacity-60 hover:opacity-100">
+            <i className="fa-solid fa-xmark text-xs" />
+          </button>
+        </div>
+      )}
 
       {/* ══ NAV ══════════════════════════════════════════════════ */}
       <nav className="fixed top-0 left-0 right-0 z-50 transition-all duration-300"

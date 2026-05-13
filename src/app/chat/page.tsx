@@ -32,7 +32,7 @@ export default async function ChatPage() {
     <main className="flex flex-col min-h-screen safe-bottom">
       <header className="flex items-center gap-3 px-5 pt-12 pb-4"
         style={{ borderBottom: "1px solid var(--border)" }}>
-        <Link href="/" className="w-9 h-9 rounded-xl flex items-center justify-center no-underline"
+        <Link href="/home" className="w-9 h-9 rounded-xl flex items-center justify-center no-underline"
           style={{ background: "var(--input)" }}>
           <i className="fa-solid fa-arrow-left text-sm" />
         </Link>

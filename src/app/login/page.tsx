@@ -22,6 +22,7 @@ function LoginForm() {
 
   useEffect(() => {
     if (searchParams.get("tab") === "signup") setMode("signup");
+    if (searchParams.get("error") === "callback") setError("Erro ao autenticar. Tente novamente.");
   }, [searchParams]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -46,12 +47,13 @@ function LoginForm() {
   }
 
   async function loginWithGoogle() {
-    setLoading(true);
+    setError(""); setLoading(true);
     const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: `${location.origin}/auth/callback` },
     });
+    if (error) { setError("Erro ao conectar com Google. Tente novamente."); setLoading(false); }
   }
 
   return (

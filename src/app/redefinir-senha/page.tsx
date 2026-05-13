@@ -15,16 +15,21 @@ export default function RedefinirSenhaPage() {
   const [showPass, setShowPass] = useState(false);
 
   useEffect(() => {
-    // Supabase fires PASSWORD_RECOVERY when the user follows the reset link
     const supabase = createClient();
+
+    // Listen for PASSWORD_RECOVERY event fired when user follows reset link
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY") setStage("form");
     });
 
-    // Give it a moment; if no recovery event, check if already has session
+    // Also check existing session (handles page refresh after event fires)
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) setStage("form");
-      else setTimeout(() => setStage(s => s === "loading" ? "expired" : s), 3000);
+      if (session) {
+        setStage("form");
+      } else {
+        // Wait longer for slow connections — 8s before showing "expired"
+        setTimeout(() => setStage(s => s === "loading" ? "expired" : s), 8000);
+      }
     });
 
     return () => subscription.unsubscribe();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { CATEGORIES } from "@/lib/categories";
 import { BRL, formatDate, MONTH_NAMES } from "@/lib/formatters";
 import AddToCardModal from "@/app/cartoes/AddToCardModal";
@@ -267,6 +268,7 @@ function PagarFaturaModal({
 export default function CardDetailClient({
   cardName, cardType, settings, allTransactions, futureFaturas, installmentSeries, month, year,
 }: Props) {
+  const router = useRouter();
   const [tab, setTab]           = useState<"fatura" | "parcelas" | "futuro">("fatura");
   const [showAdd, setShowAdd]   = useState(false);
   const [showPagar, setShowPagar] = useState(false);
@@ -580,7 +582,7 @@ export default function CardDetailClient({
           cardName={cardName}
           cardType={cardType}
           onClose={() => setShowAdd(false)}
-          onSaved={() => window.location.reload()}
+          onSaved={() => router.refresh()}
         />
       )}
 
@@ -588,7 +590,7 @@ export default function CardDetailClient({
         <EditTransactionModal
           tx={editTx}
           onClose={() => setEditTx(null)}
-          onSaved={() => window.location.reload()}
+          onSaved={() => router.refresh()}
         />
       )}
 
@@ -600,7 +602,7 @@ export default function CardDetailClient({
           selMonth={selMonth}
           selYear={selYear}
           onClose={() => setShowPagar(false)}
-          onPaid={() => { setShowPagar(false); window.location.reload(); }}
+          onPaid={() => { setShowPagar(false); router.refresh(); }}
         />
       )}
     </div>

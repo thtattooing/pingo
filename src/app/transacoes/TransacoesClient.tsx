@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { CATEGORIES } from "@/lib/categories";
 import { BRL, formatDate } from "@/lib/formatters";
 import EditTransactionModal from "@/components/EditTransactionModal";
@@ -13,6 +14,7 @@ export default function TransacoesClient({
   initialTransactions: Transaction[];
   onRefresh?: () => void;
 }) {
+  const router = useRouter();
   const [search, setSearch]         = useState("");
   const [filterType, setFilterType] = useState<"all"|"income"|"expense">("all");
   const [filterCat, setFilterCat]   = useState<string>("all");
@@ -33,8 +35,7 @@ export default function TransacoesClient({
   const expense = filtered.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
 
   async function handleSaved() {
-    // Reload from server by hard refresh
-    window.location.reload();
+    router.refresh();
   }
 
   return (

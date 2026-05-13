@@ -25,7 +25,7 @@ interface Props {
   openSettings: string | null;
 }
 
-function VisualCard({ card, month }: { card: CardData; month: number }) {
+function VisualCard({ card, month, year }: { card: CardData; month: number; year: number }) {
   const router            = useRouter();
   const [showSettings, setShowSettings] = useState(false);
   const [showAdd, setShowAdd]           = useState(false);
@@ -127,7 +127,7 @@ function VisualCard({ card, month }: { card: CardData; month: number }) {
           accountName={card.name}
           existing={{ account_name: card.name, credit_limit: card.creditLimit, due_day: card.dueDay, color: card.color, closing_day: card.closingDay }}
           onClose={() => setShowSettings(false)}
-          onSaved={() => window.location.reload()}
+          onSaved={() => router.refresh()}
         />
       )}
 
@@ -136,18 +136,15 @@ function VisualCard({ card, month }: { card: CardData; month: number }) {
           cardName={card.name}
           cardType={card.type}
           onClose={() => setShowAdd(false)}
-          onSaved={() => window.location.reload()}
+          onSaved={() => router.refresh()}
         />
       )}
     </>
   );
 }
 
-// Dummy year variable for router push — need to pass from props
-let year = new Date().getFullYear();
-
-export default function CartoesClient({ cards, month, year: y, openSettings }: Props) {
-  year = y;
+export default function CartoesClient({ cards, month, year, openSettings }: Props) {
+  const router = useRouter();
   const [settingsCard, setSettingsCard] = useState<string | null>(openSettings);
 
   // Total fatura all credit cards
@@ -205,7 +202,7 @@ export default function CartoesClient({ cards, month, year: y, openSettings }: P
             </p>
           )}
           {creditCards.map(card => (
-            <VisualCard key={card.name} card={card} month={month} />
+            <VisualCard key={card.name} card={card} month={month} year={year} />
           ))}
         </div>
       )}
@@ -217,7 +214,7 @@ export default function CartoesClient({ cards, month, year: y, openSettings }: P
             Contas correntes
           </p>
           {checking.map(card => (
-            <VisualCard key={card.name} card={card} month={month} />
+            <VisualCard key={card.name} card={card} month={month} year={year} />
           ))}
         </div>
       )}
@@ -230,7 +227,7 @@ export default function CartoesClient({ cards, month, year: y, openSettings }: P
         <CardSettingsSheet
           accountName={settingsCard}
           onClose={() => setSettingsCard(null)}
-          onSaved={() => { setSettingsCard(null); window.location.reload(); }}
+          onSaved={() => { setSettingsCard(null); router.refresh(); }}
         />
       )}
     </div>

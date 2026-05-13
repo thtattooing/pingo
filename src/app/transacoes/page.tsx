@@ -4,15 +4,7 @@ import BottomNav from "@/components/BottomNav";
 import TransacoesClient from "./TransacoesClient";
 import MonthNav from "@/components/MonthNav";
 import Link from "next/link";
-
-function parseMonthParam(m?: string): { month: number; year: number } {
-  const now = new Date();
-  if (m) {
-    const [y, mo] = m.split("-").map(Number);
-    if (y > 2000 && mo >= 1 && mo <= 12) return { month: mo, year: y };
-  }
-  return { month: now.getMonth() + 1, year: now.getFullYear() };
-}
+import { parseMonthParam } from "@/lib/month-utils";
 
 export default async function TransacoesPage({
   searchParams,
@@ -72,7 +64,7 @@ export default async function TransacoesPage({
     <main className="flex flex-col min-h-screen safe-bottom">
       <header className="px-5 pt-12 pb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link href="/" className="w-9 h-9 rounded-xl flex items-center justify-center no-underline"
+          <Link href="/home" className="w-9 h-9 rounded-xl flex items-center justify-center no-underline"
             style={{ background: "var(--input)" }}>
             <i className="fa-solid fa-arrow-left text-sm" />
           </Link>
