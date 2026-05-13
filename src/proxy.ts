@@ -25,14 +25,19 @@ export async function proxy(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  const isAuthPage = request.nextUrl.pathname.startsWith("/login");
+  const { pathname } = request.nextUrl;
 
-  if (!user && !isAuthPage) {
+  // Rotas públicas — qualquer visitante pode acessar sem estar logado
+  const PUBLIC_PATHS = ["/", "/login", "/esqueci-senha", "/redefinir-senha", "/auth"];
+  const isPublic = PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(p + "/") || pathname.startsWith(p + "?"));
+
+  if (!user && !isPublic) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  if (user && isAuthPage) {
-    return NextResponse.redirect(new URL("/", request.url));
+  // Usuário logado tentando acessar login → manda pro home
+  if (user && pathname.startsWith("/login")) {
+    return NextResponse.redirect(new URL("/home", request.url));
   }
 
   return supabaseResponse;
