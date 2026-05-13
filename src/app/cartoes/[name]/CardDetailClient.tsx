@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { CATEGORIES } from "@/lib/categories";
 import { BRL, formatDate, MONTH_NAMES } from "@/lib/formatters";
 import AddToCardModal from "@/app/cartoes/AddToCardModal";
 import EditTransactionModal from "@/components/EditTransactionModal";
 import type { Transaction } from "@/components/TransactionList";
+import { createClient } from "@/lib/supabase/client";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -101,6 +102,166 @@ function TxRow({ tx, onClick }: { tx: CardTx; onClick?: () => void }) {
   );
 }
 
+// ── PagarFaturaModal ───────────────────────────────────────────────────────
+
+function PagarFaturaModal({
+  cardName, fatura, color, selMonth, selYear, onClose, onPaid,
+}: {
+  cardName: string; fatura: number; color: string;
+  selMonth: number; selYear: number;
+  onClose: () => void; onPaid: () => void;
+}) {
+  const [accounts, setAccounts]     = useState<string[]>([]);
+  const [fromAccount, setFromAccount] = useState("");
+  const [amount, setAmount]         = useState(fatura.toFixed(2));
+  const [date, setDate]             = useState(new Date().toISOString().split("T")[0]);
+  const [saving, setSaving]         = useState(false);
+  const [error, setError]           = useState<string | null>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .from("transactions" as any)
+      .select("account_name")
+      .eq("account_type", "checking")
+      .not("account_name", "is", null)
+      .then(({ data }: { data: { account_name: string }[] | null }) => {
+        const names = [...new Set((data ?? []).map(t => t.account_name))].filter(Boolean);
+        setAccounts(names);
+        if (names.length > 0) setFromAccount(names[0]);
+      });
+  }, []);
+
+  async function handlePagar() {
+    const parsedAmount = parseFloat(amount.replace(",", "."));
+    if (!fromAccount || isNaN(parsedAmount) || parsedAmount <= 0) return;
+    setSaving(true);
+    setError(null);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setError("Sessão expirada."); setSaving(false); return; }
+
+    const { error: err } = await supabase.from("transactions").insert({
+      user_id:      user.id,
+      description:  `Pagamento fatura ${cardName}`,
+      amount:       parsedAmount,
+      type:         "expense",
+      category_id:  "moradia", // generic category for bill payment
+      tx_type:      "transfer_internal",
+      account_type: "checking",
+      account_name: fromAccount,
+      date,
+      is_imported:  false,
+      is_recurring: false,
+    });
+
+    setSaving(false);
+    if (err) { setError(err.message); return; }
+    onPaid();
+  }
+
+  const monthLabel = `${MONTH_NAMES[selMonth - 1]} ${selYear}`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center"
+      style={{ background: "rgba(0,0,0,0.5)" }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="w-full max-w-lg rounded-t-3xl p-6 flex flex-col gap-5 animate-fade-in-up"
+        style={{ background: "var(--background)", maxHeight: "90vh", overflowY: "auto" }}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-lg font-semibold">Pagar fatura</p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+              {cardName} · {monthLabel}
+            </p>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ background: "var(--input)" }}>
+            <i className="fa-solid fa-xmark text-sm" style={{ color: "var(--muted-foreground)" }} />
+          </button>
+        </div>
+
+        {/* Fatura amount */}
+        <div className="rounded-2xl px-4 py-3 text-center"
+          style={{ background: `${color}18`, border: `1px solid ${color}40` }}>
+          <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Valor da fatura</p>
+          <p className="text-2xl font-bold mono-data" style={{ color }}>{BRL(fatura)}</p>
+        </div>
+
+        {/* Amount to pay (editable for partial) */}
+        <div>
+          <p className="text-xs mb-1.5 font-medium">Valor a pagar</p>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+            className="w-full rounded-xl px-3 py-2.5 text-sm outline-none mono-data"
+            style={{ background: "var(--input)", border: "1px solid var(--border)", color: "var(--foreground)" }}
+          />
+          <p className="text-[10px] mt-1" style={{ color: "var(--muted-foreground)" }}>
+            Pode editar para pagamento parcial
+          </p>
+        </div>
+
+        {/* From account */}
+        <div>
+          <p className="text-xs mb-1.5 font-medium">Debitar de qual conta</p>
+          {accounts.length === 0 ? (
+            <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+              Nenhuma conta corrente encontrada. Importe um extrato de conta corrente primeiro.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {accounts.map(acc => (
+                <button key={acc} onClick={() => setFromAccount(acc)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-2xl text-left"
+                  style={{
+                    background: fromAccount === acc ? "rgba(139,92,246,0.1)" : "var(--muted)",
+                    border: `1.5px solid ${fromAccount === acc ? "#8B5CF6" : "transparent"}`,
+                  }}>
+                  <i className="fa-solid fa-building-columns text-xs" style={{ color: "#8B5CF6" }} />
+                  <span className="text-sm font-medium flex-1">{acc}</span>
+                  {fromAccount === acc && <i className="fa-solid fa-check text-xs" style={{ color: "#8B5CF6" }} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Date */}
+        <div>
+          <p className="text-xs mb-1.5 font-medium">Data do pagamento</p>
+          <input
+            type="date"
+            value={date}
+            onChange={e => setDate(e.target.value)}
+            className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
+            style={{ background: "var(--input)", border: "1px solid var(--border)", color: "var(--foreground)" }}
+          />
+        </div>
+
+        {error && (
+          <p className="text-xs px-3 py-2 rounded-xl" style={{ background: "rgba(239,68,68,0.1)", color: "var(--expense)" }}>
+            {error}
+          </p>
+        )}
+
+        <button onClick={handlePagar} disabled={saving || !fromAccount || accounts.length === 0}
+          className="w-full py-4 rounded-2xl font-semibold text-sm disabled:opacity-40"
+          style={{ background: color, color: "#fff" }}>
+          {saving
+            ? <><i className="fa-solid fa-spinner fa-spin mr-2" />Registrando…</>
+            : <><i className="fa-solid fa-check mr-2" />Confirmar pagamento</>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 export default function CardDetailClient({
@@ -108,6 +269,7 @@ export default function CardDetailClient({
 }: Props) {
   const [tab, setTab]           = useState<"fatura" | "parcelas" | "futuro">("fatura");
   const [showAdd, setShowAdd]   = useState(false);
+  const [showPagar, setShowPagar] = useState(false);
   const [editTx, setEditTx]     = useState<Transaction | null>(null);
   const [selMonth, setSelMonth] = useState(month);
   const [selYear, setSelYear]   = useState(year);
@@ -255,13 +417,23 @@ export default function CardDetailClient({
             </div>
           )}
 
-          {/* Add button */}
-          <button onClick={() => setShowAdd(true)}
-            className="flex items-center justify-center gap-2 py-4 rounded-2xl text-sm font-semibold transition-all"
-            style={{ background: gradBg, color: "#fff" }}>
-            <i className="fa-solid fa-plus" />
-            Adicionar compra
-          </button>
+          {/* Action buttons */}
+          <div className="flex gap-3">
+            <button onClick={() => setShowAdd(true)}
+              className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-semibold"
+              style={{ background: gradBg, color: "#fff" }}>
+              <i className="fa-solid fa-plus text-xs" />
+              Adicionar
+            </button>
+            {fatura > 0 && (
+              <button onClick={() => setShowPagar(true)}
+                className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-semibold"
+                style={{ background: "var(--card)", color: "var(--foreground)", border: `1.5px solid ${color}60` }}>
+                <i className="fa-solid fa-money-bill-wave text-xs" style={{ color }} />
+                Pagar fatura
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -417,6 +589,18 @@ export default function CardDetailClient({
           tx={editTx}
           onClose={() => setEditTx(null)}
           onSaved={() => window.location.reload()}
+        />
+      )}
+
+      {showPagar && (
+        <PagarFaturaModal
+          cardName={cardName}
+          fatura={fatura}
+          color={color}
+          selMonth={selMonth}
+          selYear={selYear}
+          onClose={() => setShowPagar(false)}
+          onPaid={() => { setShowPagar(false); window.location.reload(); }}
         />
       )}
     </div>

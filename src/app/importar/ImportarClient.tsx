@@ -28,6 +28,8 @@ interface ImportRow extends ParsedRow {
 interface Props {
   userId: string;
   recentHashes: string[];
+  existingCards:    { name: string; color: string }[];
+  existingAccounts: { name: string; type: string }[];
 }
 
 /* ─────────────────────────────────────────── helpers */
@@ -61,8 +63,107 @@ function suggestAccountName(bank: string, type: AccountType): string {
   return `${bank} ${suffix}`;
 }
 
+/* ─────────────────────────────────────────── AccountPicker */
+function AccountPicker({
+  type, name, existingCards, existingAccounts, onChange,
+}: {
+  type: AccountType;
+  name: string;
+  existingCards:    { name: string; color: string }[];
+  existingAccounts: { name: string; type: string }[];
+  onChange: (name: string) => void;
+}) {
+  const [custom, setCustom] = useState(false);
+
+  const isCredit  = type === "credit_card";
+  const pool      = isCredit ? existingCards : existingAccounts;
+  const hasPool   = pool.length > 0;
+
+  // If selected name is not in pool, show custom input automatically
+  const inPool    = pool.some(p => p.name === name);
+  const showInput = custom || !hasPool || (name.length > 0 && !inPool);
+
+  const fallbackSuggestions = isCredit
+    ? ["Nubank Crédito","Inter Crédito","C6 Crédito","Bradesco Crédito","Itaú Crédito"]
+    : ["Nubank Conta","Inter Conta","C6 Conta","Bradesco Conta Corrente"];
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+        {isCredit ? "Selecionar cartão" : "Selecionar conta"}
+      </p>
+
+      {/* Existing cards/accounts as chips */}
+      {hasPool && (
+        <div className="flex flex-col gap-2">
+          {pool.map(p => {
+            const selected = name === p.name && !showInput;
+            const bg = isCredit && "color" in p
+              ? (p as { name: string; color: string }).color
+              : "#8B5CF6";
+            return (
+              <button
+                key={p.name}
+                onClick={() => { onChange(p.name); setCustom(false); }}
+                className="flex items-center gap-3 px-4 py-3 rounded-2xl text-left transition-all"
+                style={{
+                  background: selected ? `${bg}18` : "var(--muted)",
+                  border:     `1.5px solid ${selected ? bg : "transparent"}`,
+                }}
+              >
+                <span className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                  style={{ background: bg }}>
+                  <i className={`fa-solid ${isCredit ? "fa-credit-card" : "fa-building-columns"} text-xs text-white`} />
+                </span>
+                <span className="text-sm font-medium" style={{ color: selected ? "var(--foreground)" : "var(--muted-foreground)" }}>
+                  {p.name}
+                </span>
+                {selected && <i className="fa-solid fa-check ml-auto text-xs" style={{ color: bg }} />}
+              </button>
+            );
+          })}
+
+          <button
+            onClick={() => { setCustom(true); onChange(""); }}
+            className="text-xs text-left px-1"
+            style={{ color: "var(--muted-foreground)" }}>
+            + {isCredit ? "Outro cartão" : "Outra conta"}
+          </button>
+        </div>
+      )}
+
+      {/* Free-form input when no existing or "Outro" chosen */}
+      {showInput && (
+        <div>
+          <input
+            value={name}
+            onChange={e => onChange(e.target.value)}
+            placeholder={isCredit ? "Ex: Nubank Roxinho, C6 Crédito…" : "Ex: Inter Conta Digital…"}
+            className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
+            style={{
+              background: "var(--input)",
+              border:     "1px solid var(--border)",
+              color:      "var(--foreground)",
+            }}
+            autoFocus
+          />
+          <div className="flex gap-2 mt-2 flex-wrap">
+            {fallbackSuggestions.map(s => (
+              <button key={s} onClick={() => onChange(s)}
+                className="text-[10px] px-2 py-0.5 rounded-full"
+                style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}>
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─────────────────────────────────────────── component */
-export default function ImportarClient({ userId, recentHashes }: Props) {
+export default function ImportarClient({ userId, recentHashes, existingCards, existingAccounts }: Props) {
   const [step, setStep]           = useState<Step>("drop");
   const [bankName, setBankName]   = useState("");
   const [rawRows, setRawRows]     = useState<ParsedRow[]>([]);
@@ -394,32 +495,14 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
           ))}
         </div>
 
-        {/* Account name */}
-        <div>
-          <p className="text-xs mb-1.5" style={{ color: "var(--muted-foreground)" }}>Nome da conta</p>
-          <input
-            value={account.name}
-            onChange={e => setAccount(a => ({ ...a, name: e.target.value }))}
-            placeholder="Ex: Nubank Roxinho, Inter Conta Digital…"
-            className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
-            style={{
-              background: "var(--input)",
-              border:     "1px solid var(--border)",
-              color:      "var(--foreground)",
-            }}
-          />
-          {/* Quick suggestions */}
-          <div className="flex gap-2 mt-2 flex-wrap">
-            {["Nubank Crédito","Nubank Conta","Inter Crédito","Inter Conta","C6 Crédito","C6 Conta"].map(s => (
-              <button key={s}
-                onClick={() => setAccount(a => ({ ...a, name: s }))}
-                className="text-[10px] px-2 py-0.5 rounded-full"
-                style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}>
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Account / Card picker */}
+        <AccountPicker
+          type={account.type}
+          name={account.name}
+          existingCards={existingCards}
+          existingAccounts={existingAccounts}
+          onChange={name => setAccount(a => ({ ...a, name }))}
+        />
 
         {/* Info notice */}
         <div className="flex items-start gap-2 rounded-xl px-3 py-2.5"

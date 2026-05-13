@@ -22,6 +22,15 @@ export default async function ImportarPage() {
     `${t.date}-${Number(t.amount).toFixed(2)}-${String(t.description ?? "").slice(0, 15).toLowerCase().replace(/[^a-z0-9]/g, "")}`
   );
 
+  // Existing cards and accounts so the import picker can show them
+  const [{ data: cardRows }, { data: accountRows }] = await Promise.all([
+    supabase.from("card_settings").select("account_name,color").eq("user_id", user.id),
+    supabase.from("bank_accounts").select("name,type").eq("user_id", user.id),
+  ]);
+
+  const existingCards    = (cardRows    ?? []).map(r => ({ name: r.account_name, color: r.color ?? "#F472B6" }));
+  const existingAccounts = (accountRows ?? []).map(r => ({ name: r.name, type: r.type ?? "checking" }));
+
   return (
     <main className="flex flex-col min-h-screen safe-bottom">
       <header className="px-5 pt-12 pb-5">
@@ -37,7 +46,12 @@ export default async function ImportarPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto px-5 pb-4">
-        <ImportarClient userId={user.id} recentHashes={recentHashes} />
+        <ImportarClient
+          userId={user.id}
+          recentHashes={recentHashes}
+          existingCards={existingCards}
+          existingAccounts={existingAccounts}
+        />
       </div>
 
       <BottomNav />
