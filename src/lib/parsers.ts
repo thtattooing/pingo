@@ -188,6 +188,9 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
   ];
   let headerLine = 0;
   for (let i = 0; i < Math.min(10, lines.length - 1); i++) {
+    // Require at least 2 columns — single-cell metadata lines ("Data de geração: …") can't be headers
+    const cols = csvSplit(lines[i], sep);
+    if (cols.length < 2) continue;
     const norm = deaccent(lines[i]).toLowerCase();
     if (HEADER_SIGNALS.some(sig => norm.includes(sig))) {
       headerLine = i;
@@ -208,8 +211,9 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
   let dateI = fi(
     "data", "date", "dt ", "dt.", "vencimento", "competencia", "periodo",
   );
+  // "titulo" before "descri" — C6 extrato uses "Título" (cleaner) alongside "Descrição" (reference code)
   let descI = fi(
-    "descri", "titulo", "title", "historico", "histor",
+    "titulo", "descri", "title", "historico", "histor",
     "lancamento", "memo", "estabelecimento", "transac",
     "detalhe", "referencia", "nome", "operac", "narrativa",
   );
@@ -227,6 +231,9 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
   // Currency column — C6/Inter/Nubank export international transactions as
   // separate BRL and USD rows with a "Moeda" / "Coin" column
   const currencyColI = fi("moeda", "currency", "coin", "curr.");
+
+  // Parcela column (C6 fatura) — installment info in a dedicated column (e.g. "6/12", "Única")
+  const parcelaColI = fi("parcela", "parc.");
 
   // Nubank v2: "type" column with values "transaction" / "payment"
   const nuTypeI = fi("type");
@@ -256,27 +263,33 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
   }
 
   // ── BRL vs USD column disambiguation ─────────────────────────────────────
-  // C6/Inter/Nubank credit cards export "Valor (R$)" and "Valor (USD)" as
-  // separate columns. fi("valor") may pick the USD column first if it appears
-  // before the BRL column in the header. Fix: always prefer the BRL column.
+  // C6 fatura has: "Valor (em US$)", "Cotação (em R$)", "Valor (em R$)"
+  // "Cotação" is the exchange rate (e.g. 5.35), not the purchase amount —
+  // skip it so brlColIdx lands on the actual "Valor (em R$)" column.
+  const isXRateHeader = (h: string): boolean => {
+    const nh = deaccent(h.trim());
+    return nh.includes("cotac") || nh.includes("cambio") || nh.includes("cotation")
+        || nh.includes("taxa de") || nh.includes("exchang");
+  };
+
   if (!hasSplitCols) {
     const usdColIdx = hdr.findIndex(h => {
+      if (isXRateHeader(h)) return false;
       const nh = deaccent(h.trim());
       return (nh.includes("usd") || nh.includes("dolar") || nh.includes("dollar") || nh.includes("us$"))
           && !nh.includes("brl") && !nh.includes("r$") && !nh.includes("real") && !nh.includes("reais");
     });
     const brlColIdx = hdr.findIndex(h => {
+      if (isXRateHeader(h)) return false;
       const nh = deaccent(h.trim());
       return (nh.includes("r$") || nh.includes("brl") || nh.includes("real") || nh.includes("reais"))
           && !nh.includes("usd") && !nh.includes("dolar") && !nh.includes("dollar");
     });
     if (brlColIdx >= 0) {
-      // Explicit BRL column found — always prefer it
       amtI = brlColIdx;
     } else if (usdColIdx >= 0 && amtI === usdColIdx) {
-      // amtI is pointing at the USD column — look for the next "valor"-like column
       const altIdx = hdr.findIndex((h, i) => {
-        if (i === usdColIdx || i === dateI || i === descI) return false;
+        if (i === usdColIdx || i === dateI || i === descI || isXRateHeader(h)) return false;
         const nh = deaccent(h.trim());
         return ["valor", "amount", "quantia", "montante", "vlr"].some(t => nh.includes(t));
       });
@@ -318,7 +331,10 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
     // (one BRL, one USD). Keep only BRL rows.
     if (currencyColI >= 0) {
       const curr = (c[currencyColI] ?? "").toLowerCase().trim();
-      if (curr && curr !== "brl" && curr !== "r$" && !curr.startsWith("br")) return [];
+      // Treat empty, "brl", "r$", "real", "reais", or anything starting with "br" as BRL
+      const isBRL = !curr || curr === "brl" || curr === "r$"
+        || curr === "real" || curr === "reais" || curr.startsWith("br");
+      if (!isBRL) return [];
     }
 
     let amount: number;
@@ -344,14 +360,18 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
       amount = Math.abs(signed);
     }
 
-    const excludeCols = new Set([dateI, amtI, creditI, debitI, nuTypeI].filter(i => i >= 0));
+    const excludeCols = new Set([dateI, amtI, creditI, debitI, nuTypeI, parcelaColI].filter(i => i >= 0));
     const rawDesc = (
       descI >= 0
         ? c[descI]
         : c.find((_, i) => !excludeCols.has(i))
     ) ?? "Transação";
 
-    const raw = rawDesc || "Transação";
+    // Append "Parcela" column value (e.g. "6/12") to description so extractInstallment can parse it.
+    // C6 fatura keeps installment info in a dedicated column, not embedded in the description.
+    const parcelaRaw = parcelaColI >= 0 ? (c[parcelaColI] ?? "").trim() : "";
+    const hasParcela  = /^\d{1,2}\/\d{1,3}$/.test(parcelaRaw);
+    const raw = (hasParcela ? `${rawDesc} ${parcelaRaw}` : rawDesc) || "Transação";
     const { clean, total, current } = extractInstallment(raw);
 
     return [{

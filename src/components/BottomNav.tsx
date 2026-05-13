@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const tabs = [
-  { href: "/",           icon: "fa-house",             label: "Início"  },
+  { href: "/home",       icon: "fa-house",             label: "Início"  },
   { href: "/lancamento", icon: "fa-piggy-bank",         label: "Pingar"  },
   { href: "/metas",      icon: "fa-bullseye",           label: "Metas"   },
   { href: "/cartoes",    icon: "fa-credit-card",        label: "Cartões" },
@@ -21,7 +21,7 @@ export default function BottomNav() {
     >
       <div className="flex items-center justify-around h-16 px-2">
         {tabs.map((tab) => {
-          const active = path === tab.href || (tab.href !== "/" && path.startsWith(tab.href));
+          const active = path === tab.href || (tab.href !== "/home" && path.startsWith(tab.href));
           return (
             <Link
               key={tab.href}

@@ -44,6 +44,9 @@ const EXCLUDE_KEYWORDS = [
   /d[eé]bito\s+autom[aá]tico\s+(?:cartao|cart[aã]o)/i,
   /transfer[eê]ncia\s+entre\s+contas/i,
   /pix\s+enviado.*voc[eê]\s+mesmo/i,
+  /^pagamento\s+recebido$/i,         // Nubank fatura: bill payment credit row
+  /inclus[aã]o\s+de\s+pagamento/i,   // C6 fatura: bill credit/partial payment
+  /^fatura\s+de\s+cart[aã]o$/i,      // C6 extrato: description when paying card bill
 ];
 
 function looksLikeExclude(desc: string): boolean {
@@ -409,14 +412,16 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
           </div>
         </div>
 
-        {/* ── DIAGNÓSTICO quando 0 linhas ── */}
-        {rawRows.length === 0 && parseDebug && (
+        {/* ── DIAGNÓSTICO quando 0 linhas ou suspeito poucos ── */}
+        {(rawRows.length === 0 || (rawRows.length > 0 && rawRows.length < 5)) && parseDebug && (
           <div className="flex flex-col gap-3 rounded-2xl p-4"
             style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
             <div className="flex items-center gap-2">
               <i className="fa-solid fa-triangle-exclamation text-sm" style={{ color: "var(--expense)" }} />
               <p className="text-xs font-semibold" style={{ color: "var(--expense)" }}>
-                Não foi possível ler as colunas do arquivo
+                {rawRows.length === 0
+                  ? "Não foi possível ler as colunas do arquivo"
+                  : `Apenas ${rawRows.length} transação detectada — arquivo pode ter colunas não reconhecidas`}
               </p>
             </div>
 
@@ -461,7 +466,9 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
             )}
 
             <p className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>
-              Cole as primeiras linhas do arquivo em uma mensagem para eu ajustar o parser.
+              {rawRows.length === 0
+                ? "Cole as primeiras linhas do arquivo em uma mensagem para eu ajustar o parser."
+                : "Abra o arquivo no Bloco de Notas e cole as primeiras 10 linhas para diagnóstico."}
             </p>
           </div>
         )}

@@ -1,0 +1,23 @@
+import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import ConfiguracoesClient from "./ConfiguracoesClient";
+
+export default async function ConfiguracoesPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const displayName =
+    user.user_metadata?.full_name ||
+    user.user_metadata?.name ||
+    user.email?.split("@")[0] ||
+    "Usuário";
+
+  return (
+    <ConfiguracoesClient
+      email={user.email ?? ""}
+      displayName={displayName}
+      provider={user.app_metadata?.provider ?? "email"}
+    />
+  );
+}
