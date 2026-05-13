@@ -29,7 +29,7 @@ export default async function CartoesPage({
     ? `${nextYear + 1}-01-01`
     : `${nextYear}-${String(nextMonth + 1).padStart(2, "0")}-01`;
 
-  const [{ data: curTx }, { data: nextTx }, { data: settingsRows }] = await Promise.all([
+  const [{ data: curTx }, { data: nextTx }, { data: settingsRows }, { data: allAccounts }] = await Promise.all([
     supabase.from("transactions")
       .select("account_name,account_type,amount,type")
       .eq("user_id", user.id)
@@ -42,6 +42,12 @@ export default async function CartoesPage({
     supabase.from("card_settings")
       .select("account_name,credit_limit,due_day,closing_day,color")
       .eq("user_id", user.id),
+    // Buscar todos os account_names históricos para mostrar contas sem mov. no mês
+    supabase.from("transactions")
+      .select("account_name,account_type")
+      .eq("user_id", user.id)
+      .not("account_name", "is", null)
+      .limit(1000),
   ]);
 
   type CardData = {
@@ -89,8 +95,23 @@ export default async function CartoesPage({
     cardMap.get(t.account_name)!.nextFatura += Number(t.amount);
   });
 
-  const cards = Array.from(cardMap.values())
-    .sort((a, b) => b.currentFatura - a.currentFatura);
+  // Garantir que contas com histórico apareçam mesmo sem mov. no mês
+  const seenNames = new Set<string>();
+  (allAccounts ?? []).forEach(t => {
+    if (!t.account_name || seenNames.has(t.account_name)) return;
+    seenNames.add(t.account_name);
+    addCard(t.account_name, t.account_type ?? "checking");
+  });
+  // Contas só em card_settings (configuradas mas sem transações ainda)
+  (settingsRows ?? []).forEach(s => {
+    if (!cardMap.has(s.account_name)) addCard(s.account_name, "credit_card");
+  });
+
+  const cards = Array.from(cardMap.values()).sort((a, b) => {
+    if (a.type === "credit_card" && b.type !== "credit_card") return -1;
+    if (a.type !== "credit_card" && b.type === "credit_card") return 1;
+    return b.currentFatura - a.currentFatura;
+  });
 
   const openSettings = searchParams?.settings
     ? decodeURIComponent(searchParams.settings)
