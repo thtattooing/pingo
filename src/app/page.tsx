@@ -128,30 +128,33 @@ export default async function HomePage({
   return (
     <main className="flex flex-col min-h-screen safe-bottom">
       {/* Header */}
-      <header className="flex items-center justify-between px-5 pt-12 pb-4">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-2xl flex items-center justify-center"
-            style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", boxShadow: "0 0 12px rgba(244,114,182,0.4)" }}>
-            <i className="fa-solid fa-piggy-bank text-white text-base" />
+      <header className="px-5 pt-12 pb-1">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-2xl flex items-center justify-center"
+              style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", boxShadow: "0 0 12px rgba(244,114,182,0.4)" }}>
+              <i className="fa-solid fa-piggy-bank text-white text-base" />
+            </div>
+            <span className="text-xl font-normal leading-none" style={{ fontFamily: "var(--font-calistoga)" }}>
+              PINGO
+            </span>
           </div>
-          <span className="text-xl font-normal leading-none" style={{ fontFamily: "var(--font-calistoga)" }}>
-            PINGO
-          </span>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
+              style={{ background: "var(--primary)" }}>
+              {user.user_metadata?.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={user.user_metadata.avatar_url} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-sm font-semibold text-white">{userName.charAt(0).toUpperCase()}</span>
+              )}
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <MonthNav month={month} year={year} basePath="/" />
-          <ThemeToggle />
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
-            style={{ background: "var(--primary)" }}>
-            {user.user_metadata?.avatar_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={user.user_metadata.avatar_url} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-sm font-semibold text-white">{userName.charAt(0).toUpperCase()}</span>
-            )}
-          </div>
-        </div>
+        {/* Month navigation — destaque */}
+        <MonthNav month={month} year={year} basePath="/" />
       </header>
 
       {/* Alerta de limite */}

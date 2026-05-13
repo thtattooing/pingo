@@ -172,6 +172,9 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
       return groupIdMap.get(key)!;
     };
 
+    const dedupHash = (r: ImportRow) =>
+      `${r.date}-${Number(r.amount).toFixed(2)}-${r.description.slice(0,15).toLowerCase().replace(/[^a-z0-9]/g,"")}`;
+
     const fullPayload = toSave.map(r => ({
       user_id:               userId,
       description:           r.description,
@@ -188,9 +191,14 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
       installments:          r.installmentTotal          ?? 1,
       installment_current:   r.installmentCurrent        ?? 1,
       installment_group_id:  getGroupId(r),
+      dedup_hash:            dedupHash(r),
     }));
 
-    let { error } = await supabase.from("transactions").insert(fullPayload);
+    // upsert with ignoreDuplicates = ON CONFLICT DO NOTHING (safe to import same file twice)
+    let { error } = await supabase.from("transactions").upsert(fullPayload, {
+      onConflict: "user_id,account_name,dedup_hash",
+      ignoreDuplicates: true,
+    });
 
     // If columns don't exist yet (schema not migrated), retry with only base columns
     const isSchemaError = error && (

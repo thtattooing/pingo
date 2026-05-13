@@ -8,9 +8,9 @@ export default async function ImportarPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Fetch last 90 days of transactions to detect duplicates on import
+  // Fetch last 180 days to detect duplicates (covers 6-month statements)
   const since = new Date();
-  since.setDate(since.getDate() - 90);
+  since.setDate(since.getDate() - 180);
 
   const { data: recent } = await supabase
     .from("transactions")
