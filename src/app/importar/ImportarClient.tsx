@@ -4,10 +4,9 @@ import { useState, useCallback, useRef, useMemo } from "react";
 import { parseFile, detectBank, detectTxType, ParsedRow, ParseDebug } from "@/lib/parsers";
 import { CATEGORIES, detectCategory } from "@/lib/categories";
 import { createClient } from "@/lib/supabase/client";
-import type { AnalyzeResult } from "@/app/api/analyze/route";
 
 /* ─────────────────────────────────────────── types */
-type Step = "drop" | "paste" | "account" | "analyzing" | "preview" | "done";
+type Step = "drop" | "account" | "preview" | "done";
 type AccountType = "credit_card" | "checking";
 
 interface AccountInfo {
@@ -72,44 +71,11 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
   const [saving, setSaving]       = useState(false);
   const [savedCount, setSavedCount] = useState(0);
   const [dragOver, setDragOver]   = useState(false);
-  const [aiAvailable, setAiAvailable] = useState(true);
   const [parseDebug, setParseDebug] = useState<ParseDebug | null>(null);
   const [saveError, setSaveError]   = useState<string | null>(null);
   const [schemaWarning, setSchemaWarning] = useState(false);
-  const [pasteText, setPasteText]   = useState("");
-  const [pasteLoading, setPasteLoading] = useState(false);
-  const [pasteError, setPasteError]    = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const hashSet = useMemo(() => new Set(recentHashes), [recentHashes]);
-
-  /* ── text paste processing ── */
-  async function handlePasteAnalyze() {
-    if (!pasteText.trim()) return;
-    setPasteLoading(true);
-    setPasteError(null);
-    try {
-      const res = await fetch("/api/parse-statement", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: pasteText }),
-      });
-      const { rows: parsed, error } = await res.json() as { rows: ParsedRow[]; error?: string };
-      if (error === "no_key" || !parsed?.length) {
-        setPasteError("Não consegui extrair transações. Verifique o texto e tente novamente.");
-        setPasteLoading(false);
-        return;
-      }
-      setBankName("Extrato colado");
-      setRawRows(parsed);
-      setParseDebug(null);
-      const type = guessAccountType(parsed);
-      setAccount({ type, name: suggestAccountName("Extrato colado", type) });
-      setStep("account");
-    } catch {
-      setPasteError("Erro ao processar. Tente novamente.");
-    }
-    setPasteLoading(false);
-  }
 
   /* ── file processing ── */
   function processFile(file: File) {
@@ -148,45 +114,22 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
     if (f) processFile(f);
   }, [hashSet]);
 
-  /* ── AI analysis ── */
-  async function runAnalysis() {
-    setStep("analyzing");
-
-    const inputs = rawRows.map((r, i) => ({
-      id:          String(i),
-      description: r.description,
-      amount:      r.amount,
-      type:        r.type,
-    }));
-
-    let aiMap = new Map<string, AnalyzeResult>();
-
-    if (aiAvailable) {
-      try {
-        const res = await fetch("/api/analyze", {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ transactions: inputs }),
-        });
-        const { results, error } = await res.json() as { results: AnalyzeResult[]; error?: string };
-        if (error === "no_key") setAiAvailable(false);
-        results.forEach(r => aiMap.set(r.id, r));
-      } catch {
-        setAiAvailable(false);
-      }
-    }
+  /* ── Preview (rule-based categorization, no external API) ── */
+  function runPreview() {
+    const dedup = (r: ParsedRow) =>
+      `${r.date}-${Number(r.amount).toFixed(2)}-${r.description.slice(0,15).toLowerCase().replace(/[^a-z0-9]/g,"")}`;
 
     const mapped: ImportRow[] = rawRows.map((r, i) => {
-      const ai = aiMap.get(String(i));
-      const excluded = looksLikeExclude(r.description) || Boolean(ai?.shouldExclude);
+      const excluded = looksLikeExclude(r.description);
+      const hash     = dedup(r);
       return {
         ...r,
-        uid:          `${i}-${r.date}-${r.amount}`,
-        categoryId:   ai?.category ?? detectCategory(r.description),
-        subcategory:  ai?.subcategory ?? "",
-        selected:     !excluded && !hashSet.has(`${r.date}-${Number(r.amount).toFixed(2)}-${r.description.slice(0,15).toLowerCase().replace(/[^a-z0-9]/g,"")}`),
-        isDupe:       hashSet.has(`${r.date}-${Number(r.amount).toFixed(2)}-${r.description.slice(0,15).toLowerCase().replace(/[^a-z0-9]/g,"")}`),
-        isRecurring:  Boolean(ai?.isRecurring),
+        uid:           `${i}-${r.date}-${r.amount}`,
+        categoryId:    detectCategory(r.description),
+        subcategory:   "",
+        selected:      !excluded && !hashSet.has(hash),
+        isDupe:        hashSet.has(hash),
+        isRecurring:   false,
         shouldExclude: excluded,
       };
     });
@@ -285,7 +228,6 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
 
   const selectedCount = rows.filter(r => r.selected).length;
   const excludedCount = rows.filter(r => r.shouldExclude || r.isDupe).length;
-  const recurringRows = rows.filter(r => r.selected && r.isRecurring);
 
   /* ══════════════════════ RENDER ══════════════════════ */
 
@@ -318,24 +260,6 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
         </div>
       </div>
 
-      {/* Text paste option */}
-      <button
-        onClick={e => { e.stopPropagation(); setStep("paste"); }}
-        className="flex items-center gap-3 rounded-2xl px-4 py-4 text-left transition-all"
-        style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-        <span className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: "rgba(99,102,241,0.1)" }}>
-          <i className="fa-solid fa-paste text-lg" style={{ color: "#6366F1" }} />
-        </span>
-        <div className="flex-1">
-          <p className="text-sm font-semibold">Colar texto do extrato</p>
-          <p className="text-[11px] mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-            Cole o texto copiado do app do banco — a IA extrai as transações
-          </p>
-        </div>
-        <i className="fa-solid fa-chevron-right text-xs" style={{ color: "var(--muted-foreground)" }} />
-      </button>
-
       <div className="card-pingo flex flex-col gap-4">
         <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--muted-foreground)" }}>
           Como exportar do seu banco
@@ -355,63 +279,6 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
             </div>
           </div>
         ))}
-      </div>
-    </div>
-  );
-
-  /* PASTE */
-  if (step === "paste") return (
-    <div className="flex flex-col gap-4 animate-fade-in-up">
-      <div className="card-pingo flex flex-col gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)" }}>
-            <i className="fa-solid fa-paste text-white" />
-          </div>
-          <div>
-            <p className="font-semibold text-sm">Colar texto do extrato</p>
-            <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-              A IA identifica as transações automaticamente
-            </p>
-          </div>
-        </div>
-
-        <textarea
-          value={pasteText}
-          onChange={e => setPasteText(e.target.value)}
-          placeholder={"Cole aqui o texto do extrato...\n\nEx:\n12/04 PIX recebido João Silva R$ 150,00\n13/04 Supermercado Extra R$ 87,50\n14/04 Salário R$ 3.500,00"}
-          rows={10}
-          className="w-full rounded-xl p-3 text-sm outline-none resize-none"
-          style={{
-            background: "var(--input)",
-            border:     "1px solid var(--border)",
-            color:      "var(--foreground)",
-            fontFamily: "monospace",
-          }}
-        />
-
-        {pasteError && (
-          <div className="flex items-start gap-2 rounded-xl px-3 py-2.5"
-            style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
-            <i className="fa-solid fa-circle-exclamation text-sm flex-shrink-0" style={{ color: "var(--expense)" }} />
-            <p className="text-xs" style={{ color: "var(--expense)" }}>{pasteError}</p>
-          </div>
-        )}
-
-        <button
-          onClick={handlePasteAnalyze}
-          disabled={pasteLoading || !pasteText.trim()}
-          className="w-full py-4 rounded-2xl font-semibold text-sm btn-primary disabled:opacity-40">
-          {pasteLoading
-            ? <><i className="fa-solid fa-spinner fa-spin mr-2" />Extraindo transações…</>
-            : <><i className="fa-solid fa-wand-magic-sparkles mr-2" />Analisar texto com IA</>}
-        </button>
-
-        <button onClick={() => { setStep("drop"); setPasteText(""); setPasteError(null); }}
-          className="text-xs text-center"
-          style={{ color: "var(--muted-foreground)" }}>
-          ← Voltar para arquivos
-        </button>
       </div>
     </div>
   );
@@ -546,19 +413,19 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
           </div>
         </div>
 
-        {/* AI notice */}
+        {/* Info notice */}
         <div className="flex items-start gap-2 rounded-xl px-3 py-2.5"
           style={{ background: "rgba(244,114,182,0.08)", border: "1px solid rgba(244,114,182,0.2)" }}>
-          <i className="fa-solid fa-wand-magic-sparkles text-sm flex-shrink-0 mt-0.5" style={{ color: "var(--primary)" }} />
+          <i className="fa-solid fa-tags text-sm flex-shrink-0 mt-0.5" style={{ color: "var(--primary)" }} />
           <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-            A IA vai categorizar automaticamente, identificar assinaturas recorrentes e
-            excluir pagamentos de fatura para não duplicar os gastos.
+            Categorização automática por palavras-chave. Pagamentos de fatura e transferências
+            entre contas são excluídos automaticamente para evitar duplicatas.
           </p>
         </div>
 
-        <button onClick={runAnalysis} className="w-full py-4 rounded-2xl font-semibold text-sm btn-primary">
-          <i className="fa-solid fa-wand-magic-sparkles mr-2" />
-          Analisar com IA
+        <button onClick={runPreview} className="w-full py-4 rounded-2xl font-semibold text-sm btn-primary">
+          <i className="fa-solid fa-eye mr-2" />
+          Ver transações
         </button>
         </>
         )}
@@ -567,37 +434,6 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
           style={{ color: "var(--muted-foreground)" }}>
           ← Trocar arquivo
         </button>
-      </div>
-    </div>
-  );
-
-  /* ANALYZING */
-  if (step === "analyzing") return (
-    <div className="flex flex-col items-center gap-6 py-20 text-center">
-      <div className="relative">
-        <div className="w-20 h-20 rounded-full flex items-center justify-center"
-          style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)" }}>
-          <i className="fa-solid fa-piggy-bank text-3xl text-white animate-pig-wobble" />
-        </div>
-        <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center"
-          style={{ background: "var(--gold)" }}>
-          <i className="fa-solid fa-wand-magic-sparkles text-[10px]" style={{ color: "#100A18" }} />
-        </div>
-      </div>
-      <div>
-        <p className="font-semibold text-base">IA analisando…</p>
-        <p className="text-sm mt-1" style={{ color: "var(--muted-foreground)" }}>
-          Categorizando {rawRows.length} transações
-        </p>
-        <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-          Detectando recorrentes e excluindo pagamentos de fatura
-        </p>
-      </div>
-      <div className="flex gap-1.5">
-        {[0,1,2].map(i => (
-          <div key={i} className="w-2 h-2 rounded-full animate-pulse-alert"
-            style={{ background: "var(--primary)", animationDelay: `${i * 0.3}s` }} />
-        ))}
       </div>
     </div>
   );
@@ -638,8 +474,6 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
           <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
             {rows.filter(r => r.selected).length} selecionadas
             {excludedCount > 0 && ` · ${excludedCount} ignoradas (fatura/dupl.)`}
-            {recurringRows.length > 0 && ` · ${recurringRows.length} recorrentes`}
-            {!aiAvailable && " · sem IA (categorização automática)"}
           </p>
         </div>
         <button onClick={() => setStep("account")}
@@ -648,23 +482,6 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
           <i className="fa-solid fa-xmark text-sm" style={{ color: "var(--muted-foreground)" }} />
         </button>
       </div>
-
-      {/* Recurring summary */}
-      {recurringRows.length > 0 && (
-        <div className="rounded-2xl px-4 py-3 flex items-start gap-3"
-          style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
-          <i className="fa-solid fa-rotate text-sm flex-shrink-0 mt-0.5" style={{ color: "var(--gold)" }} />
-          <div className="flex-1">
-            <p className="text-xs font-semibold" style={{ color: "var(--gold)" }}>
-              {recurringRows.length} assinatura{recurringRows.length > 1 ? "s" : ""} recorrente{recurringRows.length > 1 ? "s" : ""} detectada{recurringRows.length > 1 ? "s" : ""}
-            </p>
-            <p className="text-[10px] mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-              {recurringRows.slice(0, 3).map(r => r.description).join(", ")}
-              {recurringRows.length > 3 ? ` e mais ${recurringRows.length - 3}…` : ""}
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Select all */}
       <div className="flex items-center justify-between px-1">
@@ -721,13 +538,7 @@ export default function ImportarClient({ userId, recentHashes }: Props) {
               {/* Description */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <p className="text-xs font-medium truncate max-w-[140px]">{row.description}</p>
-                  {row.isRecurring && (
-                    <span className="flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded-full mono-data"
-                      style={{ background: "rgba(251,191,36,0.15)", color: "var(--gold)" }}>
-                      recorrente
-                    </span>
-                  )}
+                  <p className="text-xs font-medium truncate max-w-[180px]">{row.description}</p>
                 </div>
                 <p className="text-[10px] mt-0.5 mono-data" style={{ color: "var(--muted-foreground)" }}>
                   {new Date(row.date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}

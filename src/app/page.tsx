@@ -142,10 +142,6 @@ export default async function HomePage({
         <div className="flex items-center gap-2">
           <MonthNav month={month} year={year} basePath="/" />
           <ThemeToggle />
-          <Link href="/chat" className="w-9 h-9 rounded-xl flex items-center justify-center no-underline"
-            style={{ background: "var(--input)" }}>
-            <i className="fa-solid fa-comment-dots text-sm" style={{ color: "var(--primary)" }} />
-          </Link>
           <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
             style={{ background: "var(--primary)" }}>
             {user.user_metadata?.avatar_url ? (
