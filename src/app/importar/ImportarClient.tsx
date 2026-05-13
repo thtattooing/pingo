@@ -178,6 +178,7 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
   const [parseDebug, setParseDebug] = useState<ParseDebug | null>(null);
   const [saveError, setSaveError]   = useState<string | null>(null);
   const [schemaWarning, setSchemaWarning] = useState(false);
+  const [expandedCat, setExpandedCat] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const hashSet = useMemo(() => new Set(recentHashes), [recentHashes]);
 
@@ -581,6 +582,15 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
         </button>
       </div>
 
+      {/* Auto-categorization notice */}
+      <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
+        style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)" }}>
+        <i className="fa-solid fa-wand-magic-sparkles text-xs flex-shrink-0" style={{ color: "var(--income)" }} />
+        <p className="text-xs" style={{ color: "var(--income)" }}>
+          Categorias detectadas automaticamente. Toque no badge colorido de cada linha para corrigir se precisar.
+        </p>
+      </div>
+
       {/* Select all */}
       <div className="flex items-center justify-between px-1">
         <button onClick={toggleAll} className="text-xs font-semibold" style={{ color: "var(--primary)" }}>
@@ -627,11 +637,17 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
                 {!isIgnored && row.selected && <i className="fa-solid fa-check text-[9px] text-white" />}
               </button>
 
-              {/* Category icon */}
-              <span className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: `${cat.color}20` }}>
-                <i className={`fa-solid ${cat.icon} text-xs`} style={{ color: cat.color }} />
-              </span>
+              {/* Category badge — tap to expand picker */}
+              <button
+                onClick={() => !isIgnored && setExpandedCat(expandedCat === row.uid ? null : row.uid)}
+                disabled={isIgnored}
+                className="flex items-center gap-1 px-2 py-1 rounded-xl flex-shrink-0 transition-all"
+                style={{ background: `${cat.color}18`, border: `1px solid ${cat.color}35` }}
+                title="Toque para mudar categoria">
+                <i className={`fa-solid ${cat.icon} text-[10px]`} style={{ color: cat.color }} />
+                <span className="text-[9px] font-semibold hidden sm:inline" style={{ color: cat.color }}>{cat.name}</span>
+                {!isIgnored && <i className="fa-solid fa-chevron-down text-[7px]" style={{ color: cat.color, opacity: 0.7 }} />}
+              </button>
 
               {/* Description */}
               <div className="flex-1 min-w-0">
@@ -662,20 +678,28 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
               </div>
             </div>
 
-            {/* Category pills */}
-            {row.selected && !isIgnored && (
-              <div className="flex gap-1.5 overflow-x-auto pl-8" style={{ scrollbarWidth: "none" }}>
-                {CATEGORIES.map(c => (
-                  <button key={c.id} onClick={() => setCat(row.uid, c.id)}
-                    className="flex-shrink-0 px-2 py-0.5 rounded-full text-[9px] transition-all"
-                    style={{
-                      background: row.categoryId === c.id ? `${c.color}25` : "var(--muted)",
-                      border:     `1px solid ${row.categoryId === c.id ? c.color + "70" : "transparent"}`,
-                      color:      row.categoryId === c.id ? c.color : "var(--muted-foreground)",
-                    }}>
-                    {c.name}
-                  </button>
-                ))}
+            {/* Category picker — opens on badge tap */}
+            {row.selected && !isIgnored && expandedCat === row.uid && (
+              <div className="rounded-xl p-2 mt-0.5"
+                style={{ background: "var(--muted)", border: "1px solid var(--border)" }}>
+                <p className="text-[9px] font-semibold mb-2 px-1" style={{ color: "var(--muted-foreground)" }}>
+                  Escolher categoria
+                </p>
+                <div className="flex gap-1.5 flex-wrap">
+                  {CATEGORIES.map(c => (
+                    <button key={c.id}
+                      onClick={() => { setCat(row.uid, c.id); setExpandedCat(null); }}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-medium transition-all"
+                      style={{
+                        background: row.categoryId === c.id ? `${c.color}25` : "var(--card)",
+                        border:     `1px solid ${row.categoryId === c.id ? c.color + "70" : "transparent"}`,
+                        color:      row.categoryId === c.id ? c.color : "var(--muted-foreground)",
+                      }}>
+                      <i className={`fa-solid ${c.icon} text-[8px]`} style={{ color: c.color }} />
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
