@@ -5,7 +5,6 @@ import { useTheme } from "@/components/ThemeProvider";
 import Link from "next/link";
 import { useState } from "react";
 
-type Section = "perfil" | "senha" | "email" | "conta";
 
 interface Props {
   email: string;
@@ -291,6 +290,23 @@ export default function ConfiguracoesClient({ email, displayName, provider }: Pr
             </button>
           </SectionCard>
         )}
+
+        {/* ── Personalização ── */}
+        <SectionCard title="Personalização" icon="fa-palette">
+          <Link href="/categorias"
+            className="flex items-center gap-3 py-2 no-underline"
+            style={{ color: "var(--foreground)" }}>
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: "rgba(244,114,182,0.08)" }}>
+              <i className="fa-solid fa-tags text-xs" style={{ color: "var(--primary)" }} />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium">Categorias</p>
+              <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>Criar e gerenciar categorias personalizadas</p>
+            </div>
+            <i className="fa-solid fa-chevron-right text-xs" style={{ color: "var(--muted-foreground)" }} />
+          </Link>
+        </SectionCard>
 
         {/* ── Conta ── */}
         <SectionCard title="Conta" icon="fa-circle-user">

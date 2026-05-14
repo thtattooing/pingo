@@ -242,6 +242,23 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
   const isNubankV2  = nuTypeI >= 0 && sampleTypes.length > 0 &&
     sampleTypes.every(v => ["transaction","payment","refund","credit_card_cashback","pix","international"].includes(v));
 
+  // D/C type column: some banks (Santander, Bradesco, Caixa, older formats) mark type separately
+  // Values: "D"/"C", "Débito"/"Crédito", "Debit"/"Credit", "Saída"/"Entrada"
+  const dcColI = fi("tipo", "dc", "d/c", "c/d", "natureza", "operac");
+  const sampleDC = dataRows
+    .map(r => deaccent((r[dcColI] ?? "")).toLowerCase().trim())
+    .filter(Boolean);
+  const hasDCCol = dcColI >= 0
+    && dcColI !== dateI && dcColI !== amtI && dcColI !== descI
+    && dcColI !== nuTypeI && dcColI !== currencyColI
+    && sampleDC.length > 0
+    && sampleDC.every(v =>
+      v === "d" || v === "c" || v === "db" || v === "cr"
+      || v.startsWith("deb") || v.startsWith("cred")
+      || v.startsWith("entra") || v.startsWith("said") || v.startsWith("saída")
+      || v === "debit" || v === "credit" || v === "in" || v === "out"
+    );
+
   // ── Content-based auto-detect (fallback for unknown/garbled headers) ───────
   const colCount = hdr.length;
 
@@ -353,6 +370,14 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
       if (isNaN(raw) || raw === 0) return [];
       amount = Math.abs(raw);
       type   = "expense"; // Nubank v2 credit card: all non-payment rows are expenses
+    } else if (hasDCCol) {
+      const raw = parseAmount(c[amtI] ?? "");
+      if (isNaN(raw) || raw === 0) return [];
+      amount = Math.abs(raw);
+      const dcVal = deaccent((c[dcColI] ?? "")).toLowerCase().trim();
+      const isCredit = dcVal === "c" || dcVal === "cr" || dcVal === "credit"
+        || dcVal.startsWith("cred") || dcVal.startsWith("entra") || dcVal === "in";
+      type = isCredit ? "income" : "expense";
     } else {
       const signed = parseAmount(c[amtI] ?? "");
       if (isNaN(signed) || signed === 0) return [];
@@ -360,7 +385,7 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
       amount = Math.abs(signed);
     }
 
-    const excludeCols = new Set([dateI, amtI, creditI, debitI, nuTypeI, parcelaColI].filter(i => i >= 0));
+    const excludeCols = new Set([dateI, amtI, creditI, debitI, nuTypeI, parcelaColI, dcColI].filter(i => i >= 0));
     const rawDesc = (
       descI >= 0
         ? c[descI]

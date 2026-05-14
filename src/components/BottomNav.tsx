@@ -4,11 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const tabs = [
-  { href: "/home",       icon: "fa-house",             label: "Início"  },
-  { href: "/lancamento", icon: "fa-piggy-bank",         label: "Pingar"  },
-  { href: "/metas",      icon: "fa-bullseye",           label: "Metas"   },
-  { href: "/cartoes",    icon: "fa-credit-card",        label: "Cartões" },
-  { href: "/contas",     icon: "fa-building-columns",   label: "Contas"  },
+  { href: "/home",       icon: "fa-house",           label: "Início"   },
+  { href: "/lancamento", icon: "fa-piggy-bank",       label: "Pingar"   },
+  { href: "/insights",   icon: "fa-chart-pie",        label: "Insights" },
+  { href: "/cartoes",    icon: "fa-credit-card",      label: "Cartões"  },
+  { href: "/transacoes", icon: "fa-list",             label: "Extratos" },
 ];
 
 export default function BottomNav() {

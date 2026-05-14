@@ -9,7 +9,6 @@ import type { Transaction } from "@/components/TransactionList";
 
 export default function TransacoesClient({
   initialTransactions,
-  onRefresh,
   userId,
 }: {
   initialTransactions: Transaction[];
@@ -17,34 +16,56 @@ export default function TransacoesClient({
   userId?: string;
 }) {
   const router = useRouter();
-  const [search, setSearch]         = useState("");
-  const [filterType, setFilterType] = useState<"all"|"income"|"expense">("all");
-  const [filterCat, setFilterCat]   = useState<string>("all");
-  const [editTx, setEditTx]         = useState<Transaction | null>(null);
-  const [txList, setTxList]         = useState(initialTransactions);
+  const [search, setSearch]               = useState("");
+  const [filterType, setFilterType]       = useState<"all"|"income"|"expense">("all");
+  const [filterCat, setFilterCat]         = useState<string>("all");
+  const [filterAccount, setFilterAccount] = useState<string>("all");
+  const [dateFrom, setDateFrom]           = useState("");
+  const [dateTo, setDateTo]               = useState("");
+  const [showFilters, setShowFilters]     = useState(false);
+  const [editTx, setEditTx]               = useState<Transaction | null>(null);
+  const [txList]                          = useState(initialTransactions);
+
+  const accounts = useMemo(() => {
+    const seen = new Set<string>();
+    return txList
+      .filter(t => t.accountName)
+      .reduce<{ name: string; type: string }[]>((acc, t) => {
+        const k = t.accountName!;
+        if (!seen.has(k)) { seen.add(k); acc.push({ name: k, type: t.accountType ?? "checking" }); }
+        return acc;
+      }, []);
+  }, [txList]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return txList.filter(tx => {
       if (filterType !== "all" && tx.type !== filterType) return false;
       if (filterCat !== "all" && tx.category !== filterCat) return false;
+      if (filterAccount !== "all" && tx.accountName !== filterAccount) return false;
+      if (dateFrom && tx.date < dateFrom) return false;
+      if (dateTo && tx.date > dateTo) return false;
       if (q && !tx.description.toLowerCase().includes(q) && !tx.accountName?.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [txList, search, filterType, filterCat]);
+  }, [txList, search, filterType, filterCat, filterAccount, dateFrom, dateTo]);
 
   const income  = filtered.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const expense = filtered.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
 
-  async function handleSaved() {
-    router.refresh();
+  const hasActiveFilter = filterType !== "all" || filterCat !== "all" || filterAccount !== "all" || !!dateFrom || !!dateTo;
+
+  function clearFilters() {
+    setFilterType("all"); setFilterCat("all"); setFilterAccount("all");
+    setDateFrom(""); setDateTo("");
   }
 
   return (
     <>
-      {/* Search bar */}
+      {/* Search + filter toggle */}
       <div className="px-5 mb-3">
-        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+          style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <i className="fa-solid fa-magnifying-glass text-sm" style={{ color: "var(--muted-foreground)" }} />
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Buscar transação..."
@@ -55,10 +76,20 @@ export default function TransacoesClient({
               <i className="fa-solid fa-xmark text-sm" style={{ color: "var(--muted-foreground)" }} />
             </button>
           )}
+          <button onClick={() => setShowFilters(v => !v)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-all"
+            style={{
+              background: showFilters || hasActiveFilter ? "rgba(244,114,182,0.15)" : "var(--input)",
+              color: showFilters || hasActiveFilter ? "var(--primary)" : "var(--muted-foreground)",
+              border: `1px solid ${showFilters || hasActiveFilter ? "rgba(244,114,182,0.3)" : "transparent"}`,
+            }}>
+            <i className="fa-solid fa-sliders text-xs" />
+            {hasActiveFilter && <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--primary)" }} />}
+          </button>
         </div>
       </div>
 
-      {/* Type filter */}
+      {/* Type pills */}
       <div className="flex gap-2 px-5 mb-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
         {([
           { id: "all", label: "Todos" },
@@ -75,29 +106,98 @@ export default function TransacoesClient({
             {f.label}
           </button>
         ))}
-
-        {CATEGORIES.slice(0, 6).map(c => (
-          <button key={c.id} onClick={() => setFilterCat(filterCat === c.id ? "all" : c.id)}
-            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all"
-            style={{
-              background: filterCat === c.id ? `${c.color}25` : "var(--card)",
-              color: filterCat === c.id ? c.color : "var(--muted-foreground)",
-              border: filterCat === c.id ? `1px solid ${c.color}50` : "1px solid var(--border)",
-            }}>
-            <i className={`fa-solid ${c.icon}`} style={{ fontSize: 10 }} />
-            {c.name}
-          </button>
-        ))}
       </div>
 
-      {/* Summary mini */}
+      {/* Expanded filters panel */}
+      {showFilters && (
+        <div className="px-5 mb-4 flex flex-col gap-3 animate-fade-in-up">
+          {/* Date range */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-medium" style={{ color: "var(--muted-foreground)" }}>Data inicial</label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl text-xs outline-none"
+                style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-medium" style={{ color: "var(--muted-foreground)" }}>Data final</label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl text-xs outline-none"
+                style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }} />
+            </div>
+          </div>
+
+          {/* Account filter */}
+          {accounts.length > 1 && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-medium" style={{ color: "var(--muted-foreground)" }}>Conta / Cartão</label>
+              <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                <button onClick={() => setFilterAccount("all")}
+                  className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium"
+                  style={{
+                    background: filterAccount === "all" ? "var(--primary)" : "var(--card)",
+                    color: filterAccount === "all" ? "#fff" : "var(--muted-foreground)",
+                    border: filterAccount === "all" ? "none" : "1px solid var(--border)",
+                  }}>Todas</button>
+                {accounts.map(acc => (
+                  <button key={acc.name} onClick={() => setFilterAccount(acc.name)}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium"
+                    style={{
+                      background: filterAccount === acc.name ? "rgba(139,92,246,0.15)" : "var(--card)",
+                      color: filterAccount === acc.name ? "#8B5CF6" : "var(--muted-foreground)",
+                      border: filterAccount === acc.name ? "1px solid rgba(139,92,246,0.4)" : "1px solid var(--border)",
+                    }}>
+                    <i className={`fa-solid ${acc.type === "credit_card" ? "fa-credit-card" : "fa-building-columns"} text-[9px]`} />
+                    <span className="max-w-[90px] truncate">{acc.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Category filter — all categories */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-medium" style={{ color: "var(--muted-foreground)" }}>Categoria</label>
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => setFilterCat("all")}
+                className="px-3 py-1.5 rounded-full text-xs font-medium"
+                style={{
+                  background: filterCat === "all" ? "var(--primary)" : "var(--card)",
+                  color: filterCat === "all" ? "#fff" : "var(--muted-foreground)",
+                  border: filterCat === "all" ? "none" : "1px solid var(--border)",
+                }}>Todas</button>
+              {CATEGORIES.map(c => (
+                <button key={c.id} onClick={() => setFilterCat(filterCat === c.id ? "all" : c.id)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium"
+                  style={{
+                    background: filterCat === c.id ? `${c.color}25` : "var(--card)",
+                    color: filterCat === c.id ? c.color : "var(--muted-foreground)",
+                    border: filterCat === c.id ? `1px solid ${c.color}50` : "1px solid var(--border)",
+                  }}>
+                  <i className={`fa-solid ${c.icon}`} style={{ fontSize: 9 }} />
+                  {c.name.split(" ")[0]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {hasActiveFilter && (
+            <button onClick={clearFilters} className="text-xs self-end flex items-center gap-1.5"
+              style={{ color: "var(--muted-foreground)" }}>
+              <i className="fa-solid fa-xmark" />Limpar filtros
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Summary */}
       <div className="grid grid-cols-2 gap-3 px-5 mb-4">
         <div className="rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Entradas filtradas</p>
+          <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Entradas</p>
           <p className="mono-data text-sm font-semibold" style={{ color: "var(--income)" }}>{BRL(income)}</p>
         </div>
         <div className="rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Saídas filtradas</p>
+          <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Saídas</p>
           <p className="mono-data text-sm font-semibold" style={{ color: "var(--expense)" }}>{BRL(expense)}</p>
         </div>
       </div>
@@ -114,7 +214,7 @@ export default function TransacoesClient({
         {filtered.length > 0 && (
           <div className="card-pingo flex flex-col gap-1">
             <p className="text-xs mb-2" style={{ color: "var(--muted-foreground)" }}>
-              {filtered.length} transação{filtered.length !== 1 ? "ões" : ""}
+              {filtered.length} transaç{filtered.length !== 1 ? "ões" : "ão"}
             </p>
             {filtered.map((tx, i) => {
               const cat = CATEGORIES.find(c => c.id === tx.category) ?? CATEGORIES[CATEGORIES.length - 1];
@@ -129,13 +229,15 @@ export default function TransacoesClient({
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-medium truncate max-w-[160px]">{tx.description}</p>
+                      <p className="text-sm font-medium truncate max-w-[150px]">{tx.description}</p>
                       {tx.isShared && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: "rgba(244,114,182,0.12)", color: "var(--primary)" }}>casal</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0"
+                          style={{ background: "rgba(244,114,182,0.12)", color: "var(--primary)" }}>casal</span>
                       )}
                     </div>
-                    <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+                    <p className="text-xs truncate" style={{ color: "var(--muted-foreground)" }}>
                       {cat.name} · {formatDate(tx.date)}
+                      {tx.accountName && <> · {tx.accountName}</>}
                     </p>
                   </div>
                   <span className="mono-data text-sm font-medium flex-shrink-0"
@@ -154,7 +256,7 @@ export default function TransacoesClient({
           tx={editTx}
           userId={userId}
           onClose={() => setEditTx(null)}
-          onSaved={handleSaved}
+          onSaved={() => router.refresh()}
         />
       )}
     </>
