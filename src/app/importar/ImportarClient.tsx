@@ -244,9 +244,14 @@ export default function ImportarClient({ userId, recentHashes, manualDateAmounts
       // Type already chosen explicitly by user (or locked by preselectedCard)
       if (!preselectedCard) {
         setAccount(a => {
-          const pool = a.type === "credit_card" ? existingCards : existingAccounts;
-          // Auto-select if there's exactly one option; otherwise suggest a name
-          const autoName = pool.length === 1 ? pool[0].name : suggestAccountName(bank, a.type);
+          const isCC   = a.type === "credit_card";
+          const pool   = isCC ? existingCards : existingAccounts;
+          // Auto-select only when exactly one option exists.
+          // For CC with multiple cards: clear name → forces explicit selection (prevents wrong card import).
+          // For checking with multiple accounts: suggest a name (lower risk of mismatch).
+          const autoName = pool.length === 1
+            ? pool[0].name
+            : isCC ? "" : suggestAccountName(bank, a.type);
           return { ...a, name: autoName };
         });
       }
@@ -615,11 +620,22 @@ export default function ImportarClient({ userId, recentHashes, manualDateAmounts
       <div className="card-pingo flex flex-col gap-4">
         <div className="flex items-center gap-3 mb-1">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)" }}>
-            <i className="fa-solid fa-file-invoice text-white" />
+            style={{ background: account.type === "credit_card"
+              ? "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)"
+              : "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)" }}>
+            <i className={`fa-solid ${account.type === "credit_card" ? "fa-credit-card" : "fa-building-columns"} text-white`} />
           </div>
-          <div>
-            <p className="font-semibold text-sm">{bankName}</p>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <p className="font-semibold text-sm">{bankName}</p>
+              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
+                style={{
+                  background: account.type === "credit_card" ? "rgba(244,114,182,0.15)" : "rgba(99,102,241,0.15)",
+                  color:      account.type === "credit_card" ? "var(--primary)" : "#6366F1",
+                }}>
+                {account.type === "credit_card" ? "Fatura CC" : "Conta Corrente"}
+              </span>
+            </div>
             <p className="text-xs" style={{ color: rawRows.length === 0 ? "var(--expense)" : "var(--muted-foreground)" }}>
               {rawRows.length === 0 ? "Nenhuma transação detectada" : `${rawRows.length} transações detectadas`}
             </p>
@@ -883,7 +899,7 @@ export default function ImportarClient({ userId, recentHashes, manualDateAmounts
                 style={{ background: `${cat.color}18`, border: `1px solid ${cat.color}35` }}
                 title="Toque para mudar categoria">
                 <i className={`fa-solid ${cat.icon} text-[10px]`} style={{ color: cat.color }} />
-                <span className="text-[9px] font-semibold hidden sm:inline" style={{ color: cat.color }}>{cat.name}</span>
+                <span className="text-[9px] font-semibold" style={{ color: cat.color }}>{cat.name.split(" ")[0]}</span>
                 {!isIgnored && <i className="fa-solid fa-chevron-down text-[7px]" style={{ color: cat.color, opacity: 0.7 }} />}
               </button>
 
