@@ -17,7 +17,7 @@ export default function TransacoesClient({
 }) {
   const router = useRouter();
   const [search, setSearch]               = useState("");
-  const [filterType, setFilterType]       = useState<"all"|"income"|"expense">("all");
+  const [filterType, setFilterType]       = useState<"all"|"income"|"expense"|"transfer">("all");
   const [filterCat, setFilterCat]         = useState<string>("all");
   const [filterAccount, setFilterAccount] = useState<string>("all");
   const [dateFrom, setDateFrom]           = useState("");
@@ -40,7 +40,11 @@ export default function TransacoesClient({
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return txList.filter(tx => {
-      if (filterType !== "all" && tx.type !== filterType) return false;
+      const isTransfer = tx.txType === "transfer_internal";
+      // Transfer filter: show ONLY transfers, or hide transfers when not in transfer mode
+      if (filterType === "transfer") { if (!isTransfer) return false; }
+      else { if (isTransfer) return false; }
+      if (filterType !== "all" && filterType !== "transfer" && tx.type !== filterType) return false;
       if (filterCat !== "all" && tx.category !== filterCat) return false;
       if (filterAccount !== "all" && tx.accountName !== filterAccount) return false;
       if (dateFrom && tx.date < dateFrom) return false;
@@ -54,6 +58,7 @@ export default function TransacoesClient({
   const expense = filtered.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
 
   const hasActiveFilter = filterType !== "all" || filterCat !== "all" || filterAccount !== "all" || !!dateFrom || !!dateTo;
+  const isTransferView = filterType === "transfer";
 
   function clearFilters() {
     setFilterType("all"); setFilterCat("all"); setFilterAccount("all");
@@ -92,20 +97,27 @@ export default function TransacoesClient({
       {/* Type pills */}
       <div className="flex gap-2 px-5 mb-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
         {([
-          { id: "all", label: "Todos" },
-          { id: "expense", label: "Saídas" },
-          { id: "income",  label: "Entradas" },
-        ] as const).map(f => (
-          <button key={f.id} onClick={() => setFilterType(f.id)}
-            className="flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-medium transition-all"
-            style={{
-              background: filterType === f.id ? "var(--primary)" : "var(--card)",
-              color: filterType === f.id ? "#fff" : "var(--muted-foreground)",
-              border: filterType === f.id ? "none" : "1px solid var(--border)",
-            }}>
-            {f.label}
-          </button>
-        ))}
+          { id: "all",      label: "Todos" },
+          { id: "expense",  label: "Saídas" },
+          { id: "income",   label: "Entradas" },
+          { id: "transfer", label: "Transferências" },
+        ] as const).map(f => {
+          const isSelected = filterType === f.id;
+          const isTransfer = f.id === "transfer";
+          return (
+            <button key={f.id}
+              onClick={() => setFilterType(f.id)}
+              className="flex-shrink-0 flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-medium transition-all"
+              style={{
+                background: isSelected ? (isTransfer ? "#6366F1" : "var(--primary)") : "var(--card)",
+                color:      isSelected ? "#fff" : "var(--muted-foreground)",
+                border:     isSelected ? "none" : "1px solid var(--border)",
+              }}>
+              {isTransfer && <i className="fa-solid fa-right-left text-[9px]" />}
+              {f.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Expanded filters panel */}
@@ -191,16 +203,31 @@ export default function TransacoesClient({
       )}
 
       {/* Summary */}
-      <div className="grid grid-cols-2 gap-3 px-5 mb-4">
-        <div className="rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Entradas</p>
-          <p className="mono-data text-sm font-semibold" style={{ color: "var(--income)" }}>{BRL(income)}</p>
+      {isTransferView ? (
+        <div className="grid grid-cols-2 gap-3 px-5 mb-4">
+          <div className="rounded-2xl px-4 py-3"
+            style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
+            <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Saídas</p>
+            <p className="mono-data text-sm font-semibold" style={{ color: "#6366F1" }}>{BRL(expense)}</p>
+          </div>
+          <div className="rounded-2xl px-4 py-3"
+            style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
+            <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Entradas</p>
+            <p className="mono-data text-sm font-semibold" style={{ color: "#6366F1" }}>{BRL(income)}</p>
+          </div>
         </div>
-        <div className="rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Saídas</p>
-          <p className="mono-data text-sm font-semibold" style={{ color: "var(--expense)" }}>{BRL(expense)}</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 px-5 mb-4">
+          <div className="rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Entradas</p>
+            <p className="mono-data text-sm font-semibold" style={{ color: "var(--income)" }}>{BRL(income)}</p>
+          </div>
+          <div className="rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Saídas</p>
+            <p className="mono-data text-sm font-semibold" style={{ color: "var(--expense)" }}>{BRL(expense)}</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Transaction list */}
       <div className="px-5 flex flex-col gap-0">
@@ -217,6 +244,7 @@ export default function TransacoesClient({
               {filtered.length} transaç{filtered.length !== 1 ? "ões" : "ão"}
             </p>
             {filtered.map((tx, i) => {
+              const isTransfer = tx.txType === "transfer_internal";
               const cat = CATEGORIES.find(c => c.id === tx.category) ?? CATEGORIES[CATEGORIES.length - 1];
               const isIncome = tx.type === "income";
               return (
@@ -224,8 +252,9 @@ export default function TransacoesClient({
                   className="flex items-center gap-3 py-3 border-b last:border-b-0 text-left w-full animate-fade-in-up"
                   style={{ borderColor: "var(--border)", animationDelay: `${Math.min(i, 10) * 0.03}s` }}>
                   <span className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                    style={{ background: `${cat.color}20` }}>
-                    <i className={`fa-solid ${cat.icon} text-sm`} style={{ color: cat.color }} />
+                    style={{ background: isTransfer ? "rgba(99,102,241,0.12)" : `${cat.color}20` }}>
+                    <i className={`fa-solid ${isTransfer ? "fa-right-left" : cat.icon} text-sm`}
+                      style={{ color: isTransfer ? "#6366F1" : cat.color }} />
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
@@ -234,15 +263,19 @@ export default function TransacoesClient({
                         <span className="text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0"
                           style={{ background: "rgba(244,114,182,0.12)", color: "var(--primary)" }}>casal</span>
                       )}
+                      {isTransfer && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0"
+                          style={{ background: "rgba(99,102,241,0.12)", color: "#6366F1" }}>transferência</span>
+                      )}
                     </div>
                     <p className="text-xs truncate" style={{ color: "var(--muted-foreground)" }}>
-                      {cat.name} · {formatDate(tx.date)}
+                      {isTransfer ? "Transferência interna" : cat.name} · {formatDate(tx.date)}
                       {tx.accountName && <> · {tx.accountName}</>}
                     </p>
                   </div>
                   <span className="mono-data text-sm font-medium flex-shrink-0"
-                    style={{ color: isIncome ? "var(--income)" : "var(--expense)" }}>
-                    {isIncome ? "+" : "-"}{BRL(tx.amount)}
+                    style={{ color: isTransfer ? "#6366F1" : (isIncome ? "var(--income)" : "var(--expense)") }}>
+                    {isTransfer ? (isIncome ? "+" : "−") : (isIncome ? "+" : "-")}{BRL(tx.amount)}
                   </span>
                 </button>
               );

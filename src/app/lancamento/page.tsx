@@ -1,299 +1,316 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { CATEGORIES, detectCategory } from "@/lib/categories";
 import BottomNav from "@/components/BottomNav";
 import { createClient } from "@/lib/supabase/client";
 
-interface ParsedTransaction {
-  description: string;
-  amount: number;
-  type: "income" | "expense";
-  categoryId: string;
-  installments?: number;
-}
-
-function parseText(text: string): ParsedTransaction | null {
-  const lower = text.toLowerCase();
-
-  // Detecta valor
-  const amountMatch = text.match(/R?\$?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?|\d+(?:[.,]\d+)?)/i);
-  if (!amountMatch) return null;
-  const amount = parseFloat(amountMatch[1].replace(/\./g, "").replace(",", "."));
-  if (isNaN(amount) || amount <= 0) return null;
-
-  // Detecta tipo
-  const incomeWords = ["recebi","recebia","salario","salário","freelance","renda","entrada","pagamento recebido","depositaram","caiu"];
-  const isIncome = incomeWords.some(w => lower.includes(w));
-
-  // Detecta parcelas
-  const installMatch = text.match(/(\d+)x/i);
-  const installments = installMatch ? parseInt(installMatch[1]) : undefined;
-
-  // Detecta categoria
-  const categoryId = detectCategory(text);
-
-  return {
-    description: text.replace(amountMatch[0], "").trim().replace(/^(gastei|paguei|comprei|recebi|fiz)\s*/i, "").trim() || text,
-    amount,
-    type: isIncome ? "income" : "expense",
-    categoryId,
-    installments,
-  };
-}
-
-const SUGGESTIONS = [
-  { icon: "fa-cart-shopping", label: "Fiz compras no mercado", color: "#F59E0B" },
-  { icon: "fa-car",           label: "Paguei Uber",             color: "#3B82F6" },
-  { icon: "fa-money-bill-wave", label: "Recebi salário",        color: "#059669" },
-  { icon: "fa-heart-pulse",   label: "Fui ao médico",           color: "#EC4899" },
-  { icon: "fa-house",         label: "Paguei aluguel",          color: "#8B5CF6" },
-];
-
-function formatBRL(v: number) {
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
-}
-
 export default function LancamentoPage() {
-  const [text, setText] = useState("");
-  const [parsed, setParsed] = useState<ParsedTransaction | null>(null);
-  const [saved, setSaved] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
 
+  const [description, setDescription] = useState("");
+  const [amount, setAmount]           = useState("");
+  const [type, setType]               = useState<"income" | "expense">("expense");
+  const [categoryId, setCategoryId]   = useState("outros");
+  const [date, setDate]               = useState(new Date().toISOString().split("T")[0]);
+  const [accountName, setAccountName] = useState("");
+  const [accountType, setAccountType] = useState<"credit_card" | "checking">("checking");
+  const [installments, setInstallments] = useState("1");
+  const [accounts, setAccounts]       = useState<{ name: string; type: string }[]>([]);
+  const [saving, setSaving]           = useState(false);
+  const [saved, setSaved]             = useState(false);
+  const [userId, setUserId]           = useState<string | null>(null);
+
+  const descRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
-    inputRef.current?.focus();
+    descRef.current?.focus();
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) setUserId(user.id);
+    });
+    supabase
+      .from("card_settings")
+      .select("account_name,account_type")
+      .then(({ data }) => {
+        if (data) setAccounts(data.map(d => ({ name: d.account_name, type: d.account_type ?? "credit_card" })));
+      });
   }, []);
 
-  function handleChange(val: string) {
-    setText(val);
-    if (val.length > 5) {
-      setParsed(parseText(val));
-    } else {
-      setParsed(null);
+  function handleDescChange(val: string) {
+    setDescription(val);
+    if (val.length > 3) {
+      const detected = detectCategory(val);
+      if (detected !== "outros") setCategoryId(detected);
+      const lower = val.toLowerCase();
+      if (["recebi","salario","salário","freelance","renda","caiu","depositaram","entrada"].some(w => lower.includes(w))) {
+        setType("income");
+      }
     }
-    setSaved(false);
   }
 
-  function handleSuggestion(label: string) {
-    handleChange(label);
-  }
+  const parsedAmount = parseFloat(amount.replace(",", ".").replace(/[^0-9.]/g, ""));
+  const numInstall   = Math.max(1, parseInt(installments) || 1);
+  const canSave      = description.trim().length > 0 && !isNaN(parsedAmount) && parsedAmount > 0 && !!userId;
+  const selectedCat  = CATEGORIES.find(c => c.id === categoryId) ?? CATEGORIES[CATEGORIES.length - 1];
 
   async function handleSave() {
-    if (!parsed) return;
+    if (!canSave || !userId) return;
+    setSaving(true);
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
 
-    const today = new Date().toISOString().split("T")[0];
+    const base = {
+      user_id:      userId,
+      type,
+      category_id:  categoryId,
+      account_name: accountName || null,
+      account_type: accountName ? accountType : null,
+    };
 
-    if (parsed.installments && parsed.installments > 1) {
-      const totalInstallments = parsed.installments;
+    if (numInstall > 1) {
       const groupId = crypto.randomUUID();
-      const rows = Array.from({ length: totalInstallments }, (_, idx) => {
-        const d = new Date();
-        d.setMonth(d.getMonth() + idx);
+      const rows = Array.from({ length: numInstall }, (_, i) => {
+        const d = new Date(date + "T12:00:00");
+        d.setMonth(d.getMonth() + i);
         return {
-          user_id:               user.id,
-          description:           `${parsed.description || "Transação"} (${idx + 1}/${totalInstallments})`,
-          amount:                +(parsed.amount / totalInstallments).toFixed(2),
-          type:                  parsed.type,
-          category_id:           parsed.categoryId,
-          date:                  d.toISOString().split("T")[0],
-          installments:          totalInstallments,
-          installment_current:   idx + 1,
-          installment_group_id:  groupId,
+          ...base,
+          description:          `${description.trim()} (${i + 1}/${numInstall})`,
+          amount:               +(parsedAmount / numInstall).toFixed(2),
+          date:                 d.toISOString().split("T")[0],
+          installments:         numInstall,
+          installment_current:  i + 1,
+          installment_group_id: groupId,
         };
       });
-      const { error } = await supabase.from("transactions").insert(rows);
-      if (error) { console.error(error); return; }
+      await supabase.from("transactions").insert(rows);
     } else {
-      const { error } = await supabase.from("transactions").insert({
-        user_id:               user.id,
-        description:           parsed.description || "Transação",
-        amount:                parsed.amount,
-        type:                  parsed.type,
-        category_id:           parsed.categoryId,
-        date:                  today,
-        installments:          1,
-        installment_current:   1,
-        installment_group_id:  null,
+      await supabase.from("transactions").insert({
+        ...base,
+        description:         description.trim(),
+        amount:              parsedAmount,
+        date,
+        installments:        1,
+        installment_current: 1,
       });
-      if (error) { console.error(error); return; }
     }
 
+    setSaving(false);
     setSaved(true);
-    setTimeout(() => {
-      setText("");
-      setParsed(null);
-      setSaved(false);
-      router.push("/");
-      router.refresh();
-    }, 1200);
+    setTimeout(() => { router.push("/home"); router.refresh(); }, 900);
   }
 
-  const cat = parsed ? (CATEGORIES.find(c => c.id === parsed.categoryId) ?? CATEGORIES[CATEGORIES.length - 1]) : null;
+  if (saved) return (
+    <main className="flex flex-col min-h-screen items-center justify-center gap-4 safe-bottom">
+      <div className="w-20 h-20 rounded-full flex items-center justify-center"
+        style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", boxShadow: "0 0 28px rgba(244,114,182,0.4)" }}>
+        <i className="fa-solid fa-check text-3xl text-white" />
+      </div>
+      <p className="text-lg font-normal" style={{ fontFamily: "var(--font-calistoga)" }}>Lançado!</p>
+      <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>Voltando para o início…</p>
+    </main>
+  );
 
   return (
     <main className="flex flex-col min-h-screen safe-bottom">
+
       {/* Header */}
-      <header className="flex items-center gap-3 px-5 pt-12 pb-5">
-        <button
-          onClick={() => router.back()}
+      <header className="flex items-center gap-3 px-5 pt-12 pb-4">
+        <button onClick={() => router.back()}
           className="w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{ background: "var(--input)" }}
-        >
+          style={{ background: "var(--input)" }}>
           <i className="fa-solid fa-arrow-left text-sm" />
         </button>
         <div>
           <h1 className="font-semibold text-base">Lançar</h1>
-          <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-            Diga o que aconteceu
-          </p>
+          <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>Registrar transação</p>
         </div>
       </header>
 
-      <div className="flex-1 px-5 flex flex-col gap-5">
-        {/* Input de texto */}
-        <div
-          className="rounded-2xl p-4 flex flex-col gap-3"
-          style={{ background: "var(--card)", border: "1px solid var(--border)" }}
-        >
-          <div className="flex items-start gap-3">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
-              style={{ background: "linear-gradient(135deg, #1E40AF 0%, #3B82F6 100%)" }}
-            >
-              <i className="fa-solid fa-comment-dots text-white text-sm" />
-            </div>
-            <textarea
-              ref={inputRef}
-              value={text}
-              onChange={e => handleChange(e.target.value)}
-              placeholder="Ex: gastei 85 reais no almoço&#10;recebi salário de 4500&#10;paguei academia 99,90"
-              rows={3}
-              className="flex-1 bg-transparent resize-none outline-none text-sm placeholder:text-[var(--muted-foreground)] leading-relaxed"
-              style={{ color: "var(--foreground)" }}
+      <div className="flex-1 overflow-y-auto px-5 pb-32 flex flex-col gap-4">
+
+        {/* Tipo */}
+        <div className="flex gap-2">
+          {(["expense", "income"] as const).map(t => (
+            <button key={t} onClick={() => setType(t)}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm transition-all"
+              style={{
+                background: type === t
+                  ? t === "income" ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.12)"
+                  : "var(--card)",
+                border: type === t
+                  ? `1.5px solid ${t === "income" ? "rgba(16,185,129,0.4)" : "rgba(239,68,68,0.35)"}`
+                  : "1.5px solid var(--border)",
+                color: type === t
+                  ? t === "income" ? "var(--income)" : "var(--expense)"
+                  : "var(--muted-foreground)",
+              }}>
+              <i className={`fa-solid ${t === "income" ? "fa-arrow-down" : "fa-arrow-up"} text-xs`} />
+              {t === "income" ? "Entrada" : "Saída"}
+            </button>
+          ))}
+        </div>
+
+        {/* Descrição */}
+        <div>
+          <p className="text-xs mb-1.5 font-medium" style={{ color: "var(--muted-foreground)" }}>Descrição</p>
+          <input
+            ref={descRef}
+            value={description}
+            onChange={e => handleDescChange(e.target.value)}
+            placeholder="Ex: Almoço, Gasolina, Netflix…"
+            className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+            style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
+          />
+          {description.length > 3 && (
+            <p className="text-[10px] mt-1 flex items-center gap-1" style={{ color: selectedCat.color }}>
+              <i className={`fa-solid ${selectedCat.icon}`} />
+              Detectado: {selectedCat.name}
+            </p>
+          )}
+        </div>
+
+        {/* Valor + Data */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs mb-1.5 font-medium" style={{ color: "var(--muted-foreground)" }}>Valor (R$)</p>
+            <input
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              placeholder="0,00"
+              inputMode="decimal"
+              className="w-full px-4 py-3 rounded-xl text-sm outline-none mono-data"
+              style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
+            />
+          </div>
+          <div>
+            <p className="text-xs mb-1.5 font-medium" style={{ color: "var(--muted-foreground)" }}>Data</p>
+            <input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+              style={{ background: "var(--input)", color: "var(--foreground)", border: "1px solid var(--border)" }}
             />
           </div>
         </div>
 
-        {/* Preview do lançamento */}
-        {parsed && !saved && (
-          <div
-            className="rounded-2xl p-4 flex flex-col gap-4 animate-fade-in-up"
-            style={{ background: "var(--card)", border: `1px solid ${parsed.type === "income" ? "rgba(5,150,105,0.3)" : "rgba(59,130,246,0.3)"}` }}
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <i className="fa-solid fa-wand-magic-sparkles text-xs" style={{ color: "var(--primary)" }} />
-              <span className="text-xs font-medium" style={{ color: "var(--primary)" }}>
-                Detectado automaticamente
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <span
-                className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
-                style={{ background: cat ? `${cat.color}20` : "var(--muted)" }}
-              >
-                <i className={`fa-solid ${cat?.icon ?? "fa-ellipsis"} text-lg`} style={{ color: cat?.color }} />
-              </span>
-              <div className="flex-1">
-                <p className="font-semibold text-sm capitalize truncate">{parsed.description || "Transação"}</p>
-                <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-                  {cat?.name} · {parsed.type === "income" ? "Entrada" : "Saída"}
-                  {parsed.installments ? ` · ${parsed.installments}x` : ""}
-                </p>
-              </div>
-              <span
-                className="mono-data font-semibold text-base"
-                style={{ color: parsed.type === "income" ? "var(--income)" : "var(--expense)" }}
-              >
-                {parsed.type === "income" ? "+" : "-"}{formatBRL(parsed.amount)}
-              </span>
-            </div>
-
-            {/* Seletor de categoria */}
-            <div>
-              <p className="text-xs mb-2" style={{ color: "var(--muted-foreground)" }}>Alterar categoria</p>
-              <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-                {CATEGORIES.slice(0, 8).map(c => (
-                  <button
-                    key={c.id}
-                    onClick={() => setParsed(prev => prev ? { ...prev, categoryId: c.id } : null)}
-                    className="flex flex-col items-center gap-1 p-2 rounded-xl flex-shrink-0 transition-all"
-                    style={{
-                      background: parsed.categoryId === c.id ? `${c.color}25` : "var(--input)",
-                      border: parsed.categoryId === c.id ? `1px solid ${c.color}60` : "1px solid transparent",
-                      minWidth: 56,
-                    }}
-                  >
-                    <i className={`fa-solid ${c.icon} text-sm`} style={{ color: c.color }} />
-                    <span className="text-[9px]" style={{ color: "var(--muted-foreground)" }}>{c.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
+        {/* Categoria — grid completo, sem scroll horizontal */}
+        <div>
+          <p className="text-xs mb-2 font-medium" style={{ color: "var(--muted-foreground)" }}>Categoria</p>
+          <div className="grid grid-cols-4 gap-2">
+            {CATEGORIES.filter(c => c.id !== "outros").map(c => (
+              <button key={c.id}
+                onClick={() => setCategoryId(c.id)}
+                className="flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl transition-all active:scale-95"
+                style={{
+                  background: categoryId === c.id ? `${c.color}22` : "var(--card)",
+                  border: `1.5px solid ${categoryId === c.id ? c.color + "60" : "var(--border)"}`,
+                  boxShadow: categoryId === c.id ? `0 0 8px ${c.color}30` : "none",
+                }}>
+                <i className={`fa-solid ${c.icon} text-base`} style={{ color: c.color }} />
+                <span className="text-[9px] text-center leading-tight font-medium"
+                  style={{ color: categoryId === c.id ? c.color : "var(--muted-foreground)" }}>
+                  {c.name.split(" ")[0]}
+                </span>
+              </button>
+            ))}
+            {/* Outros */}
             <button
-              onClick={handleSave}
-              className="w-full py-4 rounded-2xl font-semibold text-sm btn-primary"
-            >
-              <i className="fa-solid fa-check mr-2" />
-              Confirmar lançamento
+              onClick={() => setCategoryId("outros")}
+              className="flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl transition-all active:scale-95"
+              style={{
+                background: categoryId === "outros" ? "rgba(100,116,139,0.15)" : "var(--card)",
+                border: `1.5px solid ${categoryId === "outros" ? "rgba(100,116,139,0.5)" : "var(--border)"}`,
+              }}>
+              <i className="fa-solid fa-ellipsis text-base" style={{ color: "#64748B" }} />
+              <span className="text-[9px] font-medium" style={{ color: "var(--muted-foreground)" }}>Outros</span>
             </button>
           </div>
-        )}
+        </div>
 
-        {/* Sucesso */}
-        {saved && (
-          <div
-            className="rounded-2xl p-5 flex flex-col items-center gap-3 animate-fade-in-up"
-            style={{ background: "rgba(5,150,105,0.1)", border: "1px solid rgba(5,150,105,0.3)" }}
-          >
-            <div
-              className="w-14 h-14 rounded-full flex items-center justify-center"
-              style={{ background: "rgba(5,150,105,0.2)" }}
-            >
-              <i className="fa-solid fa-check text-2xl text-income" />
-            </div>
-            <p className="font-semibold text-income">Lançado com sucesso!</p>
-            <p className="text-xs text-center" style={{ color: "var(--muted-foreground)" }}>
-              Redirecionando para o início...
+        {/* Conta (opcional) */}
+        {accounts.length > 0 && (
+          <div>
+            <p className="text-xs mb-2 font-medium" style={{ color: "var(--muted-foreground)" }}>
+              Conta / Cartão <span className="font-normal opacity-60">(opcional)</span>
             </p>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => setAccountName("")}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all"
+                style={{
+                  background: !accountName ? "rgba(244,114,182,0.12)" : "var(--card)",
+                  border: `1px solid ${!accountName ? "rgba(244,114,182,0.35)" : "var(--border)"}`,
+                  color: !accountName ? "var(--primary)" : "var(--muted-foreground)",
+                }}>
+                Nenhuma
+              </button>
+              {accounts.map(acc => {
+                const isCC = acc.type === "credit_card";
+                const sel  = accountName === acc.name;
+                return (
+                  <button key={acc.name}
+                    onClick={() => { setAccountName(acc.name); setAccountType(acc.type as "credit_card" | "checking"); }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all"
+                    style={{
+                      background: sel ? (isCC ? "rgba(244,114,182,0.12)" : "rgba(99,102,241,0.12)") : "var(--card)",
+                      border: `1px solid ${sel ? (isCC ? "rgba(244,114,182,0.35)" : "rgba(99,102,241,0.35)") : "var(--border)"}`,
+                      color: sel ? (isCC ? "var(--primary)" : "#6366F1") : "var(--muted-foreground)",
+                    }}>
+                    <i className={`fa-solid ${isCC ? "fa-credit-card" : "fa-building-columns"} text-[9px]`} />
+                    {acc.name}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
-        {/* Sugestões rápidas */}
-        {!parsed && (
-          <div className="flex flex-col gap-3">
-            <p className="text-xs font-medium" style={{ color: "var(--muted-foreground)" }}>
-              SUGESTÕES RÁPIDAS
-            </p>
-            {SUGGESTIONS.map((s, i) => (
-              <button
-                key={i}
-                onClick={() => handleSuggestion(s.label)}
-                className="flex items-center gap-3 rounded-2xl px-4 py-3.5 text-left transition-all active:scale-98 animate-fade-in-up"
+        {/* Parcelamento */}
+        <div>
+          <p className="text-xs mb-2 font-medium" style={{ color: "var(--muted-foreground)" }}>
+            Parcelamento <span className="font-normal opacity-60">(opcional)</span>
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            {["1","2","3","4","6","8","10","12","18","24"].map(n => (
+              <button key={n}
+                onClick={() => setInstallments(n)}
+                className="w-11 h-10 rounded-xl text-sm font-medium transition-all"
                 style={{
-                  background: "var(--card)",
-                  border: "1px solid var(--border)",
-                  animationDelay: `${i * 0.06}s`,
-                }}
-              >
-                <span
-                  className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ background: `${s.color}20` }}
-                >
-                  <i className={`fa-solid ${s.icon} text-sm`} style={{ color: s.color }} />
-                </span>
-                <span className="text-sm">{s.label}</span>
-                <i className="fa-solid fa-chevron-right text-xs ml-auto" style={{ color: "var(--muted-foreground)" }} />
+                  background: installments === n ? "var(--primary)" : "var(--card)",
+                  border: `1px solid ${installments === n ? "var(--primary)" : "var(--border)"}`,
+                  color: installments === n ? "#fff" : "var(--muted-foreground)",
+                  boxShadow: installments === n ? "0 0 10px rgba(244,114,182,0.35)" : "none",
+                }}>
+                {n === "1" ? "1x" : `${n}x`}
               </button>
             ))}
           </div>
-        )}
+          {numInstall > 1 && !isNaN(parsedAmount) && parsedAmount > 0 && (
+            <p className="text-[10px] mt-1.5 mono-data" style={{ color: "var(--muted-foreground)" }}>
+              {numInstall}x de R$ {(parsedAmount / numInstall).toFixed(2).replace(".", ",")} · Total R$ {parsedAmount.toFixed(2).replace(".", ",")}
+            </p>
+          )}
+        </div>
+
+      </div>
+
+      {/* Botão fixo no rodapé */}
+      <div className="fixed bottom-0 left-0 right-0 px-5 py-4 z-40"
+        style={{
+          background: "var(--background)",
+          borderTop: "1px solid var(--border)",
+          paddingBottom: "calc(env(safe-area-inset-bottom) + 4.5rem)",
+        }}>
+        <button
+          onClick={handleSave}
+          disabled={!canSave || saving}
+          className="w-full py-4 rounded-2xl font-semibold text-sm btn-primary disabled:opacity-40 transition-all">
+          {saving
+            ? <><i className="fa-solid fa-spinner fa-spin mr-2" />Salvando…</>
+            : <><i className="fa-solid fa-check mr-2" />Confirmar lançamento</>}
+        </button>
       </div>
 
       <BottomNav />

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { BRL } from "@/lib/formatters";
+import { CATEGORIES } from "@/lib/categories";
 
 // -------- Types --------
 interface SavingsGoal {
@@ -287,14 +288,35 @@ export default function MetasClient({
   budget,
   totalInvestments,
   incomeMonth,
+  healthScore,
+  healthDimensions,
+  creditUtilPct,
+  emergencyPct,
+  savingsRatePct,
+  catSpend,
+  monthGoals: initialMonthGoals,
+  curMonth,
+  curYear,
 }: {
   initialGoals: SavingsGoal[];
   initialInvestments: Investment[];
   budget: BudgetData;
   totalInvestments: number;
   incomeMonth: number;
+  healthScore: number;
+  healthDimensions: { savings: number; credit: number; emergency: number; invest: number; budget: number };
+  creditUtilPct: number;
+  emergencyPct: number;
+  savingsRatePct: number;
+  catSpend: Record<string, number>;
+  monthGoals: Record<string, number>;
+  curMonth: number;
+  curYear: number;
 }) {
-  const [tab, setTab]                   = useState<"metas"|"orcamento"|"investimentos">("metas");
+  const [tab, setTab]                   = useState<"metas"|"orcamento"|"investimentos"|"saude">("metas");
+  const [monthGoals, setMonthGoals]     = useState(initialMonthGoals);
+  const [editingCat, setEditingCat]     = useState<string | null>(null);
+  const [editVal, setEditVal]           = useState("");
   const [goals, setGoals]               = useState(initialGoals);
   const [investments, setInvestments]   = useState(initialInvestments);
   const [goalModal, setGoalModal]       = useState<SavingsGoal | null | "new">(null);
@@ -316,13 +338,36 @@ export default function MetasClient({
     setInvestments(data ?? []);
   }
 
+  async function saveEnvelope(catId: string) {
+    const parsed = parseFloat(editVal.replace(",", "."));
+    if (isNaN(parsed) || parsed <= 0) { setEditingCat(null); return; }
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setEditingCat(null); return; }
+    await supabase.from("goals").upsert(
+      { user_id: user.id, category_id: catId, limit_amount: parsed, month: curMonth, year: curYear },
+      { onConflict: "user_id,category_id,month,year" }
+    );
+    setMonthGoals(prev => ({ ...prev, [catId]: parsed }));
+    setEditingCat(null);
+  }
+
+  async function removeEnvelope(catId: string) {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from("goals").delete()
+      .eq("user_id", user.id).eq("category_id", catId).eq("month", curMonth).eq("year", curYear);
+    setMonthGoals(prev => { const n = { ...prev }; delete n[catId]; return n; });
+  }
+
   const { income, necessities, wants, savings, emergencyMonths, monthlyExpense } = budget;
   const needsPct   = income > 0 ? (necessities / income) * 100 : 0;
   const wantsPct   = income > 0 ? (wants / income) * 100 : 0;
   const savingsPct = income > 0 ? (savings / income) * 100 : 0;
   const emergencyTarget = monthlyExpense * emergencyMonths;
   const emergencyHave   = goals.find(g => g.name.toLowerCase().includes("emergência") || g.name.toLowerCase().includes("reserva"))?.current_amount ?? 0;
-  const emergencyPct    = emergencyTarget > 0 ? Math.min((emergencyHave / emergencyTarget) * 100, 100) : 0;
+  const localEmergencyPct = emergencyTarget > 0 ? Math.min((emergencyHave / emergencyTarget) * 100, 100) : 0;
 
   const investPct = incomeMonth > 0 ? (totalInvestments / incomeMonth) * 100 : 0;
 
@@ -331,17 +376,26 @@ export default function MetasClient({
       {/* Tabs */}
       <div className="flex gap-1 p-1 rounded-2xl mx-5 mb-4" style={{ background: "var(--muted)" }}>
         {([
-          { id: "metas",        label: "Metas",         icon: "fa-bullseye" },
-          { id: "orcamento",    label: "Orçamento",     icon: "fa-chart-pie" },
-          { id: "investimentos",label: "Investimentos", icon: "fa-chart-line" },
-        ] as const).map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-medium transition-all"
-            style={{ background: tab === t.id ? "var(--card)" : "transparent", color: tab === t.id ? "var(--foreground)" : "var(--muted-foreground)" }}>
-            <i className={`fa-solid ${t.icon} text-xs`} />
-            {t.label}
-          </button>
-        ))}
+          { id: "metas",        label: "Metas",    icon: "fa-bullseye" },
+          { id: "orcamento",    label: "Envelopes",icon: "fa-envelope-open-text" },
+          { id: "investimentos",label: "Invest.",  icon: "fa-chart-line" },
+          { id: "saude",        label: "Saúde",    icon: "fa-heart-pulse" },
+        ] as const).map(t => {
+          const isSaude = t.id === "saude";
+          const scoreColor = healthScore >= 75 ? "var(--income)" : healthScore >= 50 ? "var(--gold)" : "var(--expense)";
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-xl text-[10px] font-medium transition-all"
+              style={{ background: tab === t.id ? "var(--card)" : "transparent", color: tab === t.id ? "var(--foreground)" : "var(--muted-foreground)" }}>
+              {isSaude && tab === t.id ? (
+                <span className="text-xs font-bold" style={{ color: scoreColor }}>{healthScore}</span>
+              ) : (
+                <i className={`fa-solid ${t.icon} text-xs`} />
+              )}
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* ---- METAS TAB ---- */}
@@ -366,10 +420,10 @@ export default function MetasClient({
         </div>
       )}
 
-      {/* ---- ORÇAMENTO TAB ---- */}
+      {/* ---- ENVELOPES TAB ---- */}
       {tab === "orcamento" && (
         <div className="flex flex-col gap-3 px-5">
-          {/* 50/30/20 */}
+          {/* 50/30/20 overview */}
           <div className="card-pingo">
             <div className="flex items-center gap-2 mb-4">
               <i className="fa-solid fa-chart-pie text-sm" style={{ color: "var(--primary)" }} />
@@ -413,33 +467,187 @@ export default function MetasClient({
             )}
           </div>
 
-          {/* Emergency Fund */}
-          <div className="card-pingo">
-            <div className="flex items-center gap-2 mb-3">
-              <i className="fa-solid fa-shield-halved text-sm" style={{ color: "#FBBF24" }} />
-              <h3 className="text-sm font-semibold">Reserva de emergência</h3>
+          {/* Per-category envelopes */}
+          <div className="card-pingo flex flex-col gap-0">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold">Envelopes por categoria</p>
+              <p className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>Toque para definir limite</p>
             </div>
-            <p className="text-xs mb-3" style={{ color: "var(--muted-foreground)" }}>
-              Meta: {emergencyMonths} meses de gastos = {BRL(emergencyTarget)}
-            </p>
-            <div className="h-3 rounded-full overflow-hidden mb-2" style={{ background: "var(--muted)" }}>
-              <div className="h-full rounded-full transition-all"
-                style={{ width: `${emergencyPct}%`, background: emergencyPct >= 100 ? "#10B981" : "#FBBF24" }} />
-            </div>
-            <div className="flex justify-between text-xs mono-data">
-              <span style={{ color: "var(--muted-foreground)" }}>{BRL(emergencyHave)} guardados</span>
-              <span style={{ color: emergencyPct >= 100 ? "var(--income)" : "var(--gold)" }}>
-                {Math.round(emergencyPct)}% {emergencyPct >= 100 ? "✓" : ""}
-              </span>
-            </div>
-            {emergencyHave === 0 && (
-              <p className="text-xs mt-2" style={{ color: "var(--muted-foreground)" }}>
-                Crie uma meta chamada "Reserva de emergência" para acompanhar aqui.
-              </p>
-            )}
+            {CATEGORIES.map(cat => {
+              const spent   = catSpend[cat.id] ?? 0;
+              const limit   = monthGoals[cat.id];
+              const hasLimit = limit !== undefined && limit > 0;
+              const pct     = hasLimit ? Math.min((spent / limit) * 100, 100) : 0;
+              const over    = hasLimit && spent > limit;
+              const warn    = hasLimit && pct >= 80;
+              const isEdit  = editingCat === cat.id;
+
+              return (
+                <div key={cat.id} className="py-2.5 border-b last:border-b-0"
+                  style={{ borderColor: "var(--border)" }}>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                      style={{ background: `${cat.color}18` }}>
+                      <i className={`fa-solid ${cat.icon} text-[10px]`} style={{ color: cat.color }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium">{cat.name}</span>
+                        <span className="text-[10px] mono-data"
+                          style={{ color: over ? "var(--expense)" : warn ? "var(--gold)" : "var(--muted-foreground)" }}>
+                          {BRL(spent)}{hasLimit && <> / {BRL(limit)}</>}
+                        </span>
+                      </div>
+                      {hasLimit && (
+                        <div className="mt-1 h-1 rounded-full overflow-hidden" style={{ background: "var(--muted)" }}>
+                          <div className="h-full rounded-full transition-all"
+                            style={{ width: `${pct}%`, background: over ? "var(--expense)" : warn ? "var(--gold)" : cat.color }} />
+                        </div>
+                      )}
+                    </div>
+                    {!isEdit && (
+                      <button onClick={() => { setEditingCat(cat.id); setEditVal(String(limit ?? "")); }}
+                        className="text-[9px] px-2 py-1 rounded-lg flex-shrink-0"
+                        style={{ background: "var(--input)", color: "var(--muted-foreground)" }}>
+                        {hasLimit ? "Editar" : "Definir"}
+                      </button>
+                    )}
+                    {!isEdit && hasLimit && (
+                      <button onClick={() => removeEnvelope(cat.id)}
+                        className="w-5 h-5 rounded-lg flex items-center justify-center flex-shrink-0"
+                        style={{ background: "rgba(239,68,68,0.1)" }}>
+                        <i className="fa-solid fa-xmark text-[8px]" style={{ color: "var(--expense)" }} />
+                      </button>
+                    )}
+                  </div>
+                  {isEdit && (
+                    <div className="flex gap-2 mt-2 pl-9">
+                      <input
+                        type="number"
+                        value={editVal}
+                        onChange={e => setEditVal(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") saveEnvelope(cat.id); if (e.key === "Escape") setEditingCat(null); }}
+                        placeholder="Limite R$"
+                        className="flex-1 px-3 py-2 rounded-xl text-xs mono-data outline-none"
+                        style={{ background: "var(--input)", border: `1px solid ${cat.color}50`, color: "var(--foreground)" }}
+                        autoFocus
+                      />
+                      <button onClick={() => saveEnvelope(cat.id)}
+                        className="px-3 rounded-xl text-xs font-semibold btn-primary">OK</button>
+                      <button onClick={() => setEditingCat(null)}
+                        className="px-2 rounded-xl text-xs"
+                        style={{ background: "var(--input)", color: "var(--muted-foreground)" }}>✕</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
+
+      {/* ---- SAÚDE TAB ---- */}
+      {tab === "saude" && (() => {
+        const scoreColor = healthScore >= 75 ? "var(--income)" : healthScore >= 50 ? "var(--gold)" : "var(--expense)";
+        const scoreLabel = healthScore >= 75 ? "Ótimo" : healthScore >= 50 ? "Regular" : "Atenção";
+        const dims = [
+          { label: "Taxa de poupança", pts: healthDimensions.savings, max: 30,
+            hint: `${savingsRatePct.toFixed(0)}% poupado — meta: 20%+`,
+            icon: "fa-piggy-bank", color: "#10B981" },
+          { label: "Uso do crédito",   pts: healthDimensions.credit,  max: 20,
+            hint: `${creditUtilPct.toFixed(0)}% do limite usado — ideal: abaixo de 30%`,
+            icon: "fa-credit-card", color: "#6366F1" },
+          { label: "Reserva de emergência", pts: healthDimensions.emergency, max: 25,
+            hint: `${emergencyPct.toFixed(0)}% da reserva ideal (${emergencyMonths} meses)`,
+            icon: "fa-shield-halved", color: "#FBBF24" },
+          { label: "Hábito de investir", pts: healthDimensions.invest, max: 10,
+            hint: totalInvestments > 0 ? `R$ ${totalInvestments.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} investidos` : "Nenhum investimento registrado",
+            icon: "fa-chart-line", color: "#F97316" },
+          { label: "Disciplina orçamentária", pts: healthDimensions.budget, max: 15,
+            hint: "Regra 50/30/20 — quanto mais próximo, melhor",
+            icon: "fa-chart-pie", color: "#EC4899" },
+        ];
+        const tips: string[] = [];
+        if (healthDimensions.savings < 20) tips.push("Tente poupar ao menos 20% da renda — reduza desejos antes de necessidades.");
+        if (creditUtilPct > 50) tips.push("Uso do crédito acima de 50% — pague a fatura integral para melhorar a pontuação.");
+        if (emergencyPct < 50) tips.push("Reserva de emergência abaixo da metade — priorize isso antes de outros investimentos.");
+        if (totalInvestments === 0) tips.push("Registre seus investimentos na aba Invest. para calcular pontuação de crescimento.");
+        return (
+          <div className="flex flex-col gap-3 px-5">
+            {/* Score principal */}
+            <div className="card-pingo flex items-center gap-5">
+              <div className="flex flex-col items-center justify-center w-20 h-20 rounded-2xl flex-shrink-0"
+                style={{ background: `${scoreColor}15`, border: `2px solid ${scoreColor}` }}>
+                <span className="text-3xl font-bold" style={{ color: scoreColor }}>{healthScore}</span>
+                <span className="text-[9px] font-semibold" style={{ color: scoreColor }}>/100</span>
+              </div>
+              <div className="flex-1">
+                <p className="text-base font-semibold">{scoreLabel}</p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+                  Score de saúde financeira — baseado em poupança, crédito, reserva, investimentos e orçamento
+                </p>
+                <div className="mt-2 h-2 rounded-full overflow-hidden" style={{ background: "var(--muted)" }}>
+                  <div className="h-full rounded-full transition-all"
+                    style={{ width: `${healthScore}%`, background: scoreColor }} />
+                </div>
+              </div>
+            </div>
+
+            {/* Dimensões */}
+            <div className="card-pingo flex flex-col gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--muted-foreground)" }}>
+                Composição do score
+              </p>
+              {dims.map(d => (
+                <div key={d.label}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <i className={`fa-solid ${d.icon} text-[11px]`} style={{ color: d.color }} />
+                      <span className="text-xs">{d.label}</span>
+                    </div>
+                    <span className="text-xs mono-data font-semibold" style={{ color: d.color }}>
+                      {d.pts}/{d.max}
+                    </span>
+                  </div>
+                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--muted)" }}>
+                    <div className="h-full rounded-full transition-all"
+                      style={{ width: `${(d.pts / d.max) * 100}%`, background: d.color }} />
+                  </div>
+                  <p className="text-[10px] mt-0.5" style={{ color: "var(--muted-foreground)" }}>{d.hint}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Dicas */}
+            {tips.length > 0 && (
+              <div className="card-pingo flex flex-col gap-2">
+                <p className="text-xs font-semibold flex items-center gap-2">
+                  <i className="fa-solid fa-lightbulb text-xs" style={{ color: "var(--gold)" }} />
+                  Como melhorar seu score
+                </p>
+                {tips.map((tip, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: "var(--primary)" }} />
+                    <p className="text-xs leading-relaxed" style={{ color: "var(--muted-foreground)" }}>{tip}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {tips.length === 0 && healthScore >= 75 && (
+              <div className="card-pingo flex items-center gap-3 py-4">
+                <i className="fa-solid fa-trophy text-2xl" style={{ color: "var(--gold)" }} />
+                <div>
+                  <p className="text-sm font-semibold">Parabéns! Saúde financeira excelente</p>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+                    Continue mantendo seus hábitos financeiros saudáveis
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ---- INVESTIMENTOS TAB ---- */}
       {tab === "investimentos" && (

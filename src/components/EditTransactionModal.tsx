@@ -21,7 +21,8 @@ export default function EditTransactionModal({
   const [amount, setAmount]           = useState(String(tx.amount));
   const [categoryId, setCategoryId]   = useState(tx.category);
   const [type, setType]               = useState<"income" | "expense">(tx.type);
-  const [isShared, setIsShared]       = useState(tx.isShared ?? false);
+  const [isShared, setIsShared]         = useState(tx.isShared ?? false);
+  const [isReconciled, setIsReconciled] = useState(false);
   const [date, setDate]               = useState(tx.date ?? "");
   const [saving, setSaving]           = useState(false);
   const [deleting, setDeleting]       = useState(false);
@@ -35,11 +36,12 @@ export default function EditTransactionModal({
     const supabase = createClient();
     const { error } = await supabase.from("transactions").update({
       description,
-      amount:      parseFloat(amount.replace(",", ".")),
+      amount:         parseFloat(amount.replace(",", ".")),
       type,
-      category_id: categoryId,
-      is_shared:   isShared,
-      date:        date || undefined,
+      category_id:    categoryId,
+      is_shared:      isShared,
+      is_reconciled:  isReconciled,
+      date:           date || undefined,
     }).eq("id", tx.id);
 
     // Memoriza a regra se o usuário mudou a categoria
@@ -168,6 +170,28 @@ export default function EditTransactionModal({
               ))}
             </div>
           </div>
+
+          {/* Reconciliado */}
+          <button onClick={() => setIsReconciled(v => !v)}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl transition-all"
+            style={{
+              background: isReconciled ? "rgba(16,185,129,0.1)" : "var(--input)",
+              border:     isReconciled ? "1px solid rgba(16,185,129,0.3)" : "1px solid transparent",
+            }}>
+            <i className="fa-solid fa-circle-check text-sm"
+              style={{ color: isReconciled ? "var(--income)" : "var(--muted-foreground)" }} />
+            <div className="flex-1 text-left">
+              <span className="text-sm">Reconciliado</span>
+              <p className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>
+                Confirma que este lançamento bate com o extrato bancário
+              </p>
+            </div>
+            <div className="w-10 h-5 rounded-full relative transition-all"
+              style={{ background: isReconciled ? "var(--income)" : "var(--muted)" }}>
+              <div className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+                style={{ left: isReconciled ? "calc(100% - 1.125rem)" : "0.125rem" }} />
+            </div>
+          </button>
 
           {/* Despesa do casal */}
           <button onClick={() => setIsShared(v => !v)}
