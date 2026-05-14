@@ -10,9 +10,11 @@ import type { Transaction } from "@/components/TransactionList";
 export default function TransacoesClient({
   initialTransactions,
   onRefresh,
+  userId,
 }: {
   initialTransactions: Transaction[];
   onRefresh?: () => void;
+  userId?: string;
 }) {
   const router = useRouter();
   const [search, setSearch]         = useState("");
@@ -150,6 +152,7 @@ export default function TransacoesClient({
       {editTx && (
         <EditTransactionModal
           tx={editTx}
+          userId={userId}
           onClose={() => setEditTx(null)}
           onSaved={handleSaved}
         />

@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useMemo } from "react";
 import { parseFile, detectBank, detectTxType, ParsedRow, ParseDebug } from "@/lib/parsers";
 import { CATEGORIES, detectCategory } from "@/lib/categories";
 import { createClient } from "@/lib/supabase/client";
+import { loadCategoryRules, descriptionKey } from "@/lib/category-memory";
 
 /* ─────────────────────────────────────────── types */
 type Step = "drop" | "account" | "preview" | "done";
@@ -220,17 +221,21 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
   }, [hashSet]);
 
   /* ── Preview (rule-based categorization, no external API) ── */
-  function runPreview() {
+  async function runPreview() {
     const dedup = (r: ParsedRow) =>
       `${r.date}-${Number(r.amount).toFixed(2)}-${r.description.slice(0,15).toLowerCase().replace(/[^a-z0-9]/g,"")}`;
+
+    const supabase = createClient();
+    const rules = await loadCategoryRules(supabase, userId);
 
     const mapped: ImportRow[] = rawRows.map((r, i) => {
       const excluded = looksLikeExclude(r.description);
       const hash     = dedup(r);
+      const learned  = rules.get(descriptionKey(r.description));
       return {
         ...r,
         uid:           `${i}-${r.date}-${r.amount}`,
-        categoryId:    detectCategory(r.description),
+        categoryId:    learned ?? detectCategory(r.description),
         subcategory:   "",
         selected:      !excluded && !hashSet.has(hash),
         isDupe:        hashSet.has(hash),

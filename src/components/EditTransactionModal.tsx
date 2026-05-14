@@ -3,16 +3,19 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { CATEGORIES } from "@/lib/categories";
+import { saveCategoryRule } from "@/lib/category-memory";
 import type { Transaction } from "./TransactionList";
 
 export default function EditTransactionModal({
   tx,
   onClose,
   onSaved,
+  userId,
 }: {
   tx: Transaction;
   onClose: () => void;
   onSaved: () => void;
+  userId?: string;
 }) {
   const [description, setDescription] = useState(tx.description);
   const [amount, setAmount]           = useState(String(tx.amount));
@@ -25,6 +28,7 @@ export default function EditTransactionModal({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const currentCat = CATEGORIES.find(c => c.id === categoryId) ?? CATEGORIES[CATEGORIES.length - 1];
+  const categoryChanged = categoryId !== tx.category;
 
   async function handleSave() {
     setSaving(true);
@@ -37,6 +41,12 @@ export default function EditTransactionModal({
       is_shared:   isShared,
       date:        date || undefined,
     }).eq("id", tx.id);
+
+    // Memoriza a regra se o usuário mudou a categoria
+    if (!error && categoryChanged && userId) {
+      await saveCategoryRule(supabase, userId, description, categoryId);
+    }
+
     setSaving(false);
     if (!error) { onSaved(); onClose(); }
   }

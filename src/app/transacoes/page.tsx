@@ -77,7 +77,7 @@ export default async function TransacoesPage({
       </header>
 
       <div className="flex-1 overflow-y-auto pb-4">
-        <TransacoesClient initialTransactions={transactions} />
+        <TransacoesClient initialTransactions={transactions} userId={user.id} />
       </div>
 
       <BottomNav />

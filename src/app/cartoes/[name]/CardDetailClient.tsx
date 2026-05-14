@@ -55,12 +55,12 @@ interface Props {
   cardName: string;
   cardType: string;
   settings: CardSettings | null;
-  // All transactions for this card (past + future)
   allTransactions: CardTx[];
   futureFaturas: FutureMonth[];
   installmentSeries: InstallmentSeries[];
   month: number;
   year: number;
+  userId?: string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -266,7 +266,7 @@ function PagarFaturaModal({
 // ── Main ───────────────────────────────────────────────────────────────────
 
 export default function CardDetailClient({
-  cardName, cardType, settings, allTransactions, futureFaturas, installmentSeries, month, year,
+  cardName, cardType, settings, allTransactions, futureFaturas, installmentSeries, month, year, userId,
 }: Props) {
   const router = useRouter();
   const [tab, setTab]           = useState<"fatura" | "parcelas" | "futuro">("fatura");
@@ -589,6 +589,7 @@ export default function CardDetailClient({
       {editTx && (
         <EditTransactionModal
           tx={editTx}
+          userId={userId}
           onClose={() => setEditTx(null)}
           onSaved={() => router.refresh()}
         />

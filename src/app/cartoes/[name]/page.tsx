@@ -170,6 +170,7 @@ export default async function CardDetailPage({
           installmentSeries={installmentSeries}
           month={month}
           year={year}
+          userId={user.id}
         />
       </div>
 
