@@ -82,7 +82,8 @@ export default async function HomePage({
       .from("transactions")
       .select("amount,type,tx_type")
       .eq("user_id", user.id)
-      .neq("account_type", "credit_card"),
+      .neq("account_type", "credit_card")
+      .gte("date", (() => { const d = new Date(); d.setFullYear(d.getFullYear() - 3); return d.toISOString().split("T")[0]; })()),
 
     supabase
       .from("transactions")
