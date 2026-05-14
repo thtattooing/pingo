@@ -138,8 +138,8 @@ export default async function HomePage({
 
   // Caixa Livre (Etapa 1)
   const initialBalance  = (bankMeta ?? []).reduce((s, a) => s + Number(a.initial_balance ?? 0), 0);
-  const checkingIncome  = (checkingTxRows ?? []).filter(t => t.type === "income"  && t.tx_type !== "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
-  const checkingExpense = (checkingTxRows ?? []).filter(t => t.type === "expense" && t.tx_type !== "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
+  const checkingIncome  = (checkingTxRows ?? []).filter(t => t.type === "income" ).reduce((s, t) => s + Number(t.amount), 0);
+  const checkingExpense = (checkingTxRows ?? []).filter(t => t.type === "expense").reduce((s, t) => s + Number(t.amount), 0);
   const checkingBalance = initialBalance + checkingIncome - checkingExpense;
 
   const ccMonthExpense  = txList.filter(t => t.account_type === "credit_card" && t.type === "expense" && t.tx_type !== "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
