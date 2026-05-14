@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
 import BalanceCard from "@/components/BalanceCard";
 import CategoryBar from "@/components/CategoryBar";
-import TransactionList from "@/components/TransactionList";
+import HomeTransactionSection from "@/components/HomeTransactionSection";
 import MonthNav from "@/components/MonthNav";
 import ThemeToggle from "@/components/ThemeToggle";
 import EyeToggle from "@/components/EyeToggle";
@@ -378,7 +378,7 @@ export default async function HomePage({
         </div>
 
         {/* Transações */}
-        <TransactionList transactions={transactions} />
+        <HomeTransactionSection transactions={transactions} userId={user.id} />
 
         <Link href={`/transacoes?m=${year}-${String(month).padStart(2,"0")}`}
           className="flex items-center justify-center gap-2 py-3 rounded-2xl text-sm no-underline transition-all active:scale-95"
