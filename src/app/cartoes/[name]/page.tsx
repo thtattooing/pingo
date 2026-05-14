@@ -10,15 +10,17 @@ export default async function CardDetailPage({
   params,
   searchParams,
 }: {
-  params: { name: string };
-  searchParams?: { m?: string };
+  params: Promise<{ name: string }>;
+  searchParams?: Promise<{ m?: string }>;
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const cardName = decodeURIComponent(params.name);
-  const { month, year } = parseMonthParam(searchParams?.m);
+  const { name } = await params;
+  const sp = await searchParams;
+  const cardName = decodeURIComponent(name);
+  const { month, year } = parseMonthParam(sp?.m);
   const now = new Date();
 
   // ── 1. All transactions for this card (12 months back + 12 months forward)
@@ -27,14 +29,22 @@ export default async function CardDetailPage({
   const future = new Date(now);
   future.setFullYear(future.getFullYear() + 2);
 
-  const { data: txRows } = await supabase
-    .from("transactions")
-    .select("id,description,amount,type,category_id,date,installments,installment_current,installment_group_id,is_recurring,subcategory,account_type")
-    .eq("user_id", user.id)
-    .eq("account_name", cardName)
-    .gte("date", past.toISOString().split("T")[0])
-    .lte("date", future.toISOString().split("T")[0])
-    .order("date", { ascending: false });
+  const [{ data: txRows }, { data: settings }] = await Promise.all([
+    supabase
+      .from("transactions")
+      .select("id,description,amount,type,category_id,date,installments,installment_current,installment_group_id,is_recurring,subcategory,account_type,tx_type")
+      .eq("user_id", user.id)
+      .eq("account_name", cardName)
+      .gte("date", past.toISOString().split("T")[0])
+      .lte("date", future.toISOString().split("T")[0])
+      .order("date", { ascending: false }),
+    supabase
+      .from("card_settings")
+      .select("credit_limit,due_day,closing_day,color,account_type")
+      .eq("user_id", user.id)
+      .eq("account_name", cardName)
+      .maybeSingle(),
+  ]);
 
   if (!txRows) notFound();
 
@@ -50,17 +60,11 @@ export default async function CardDetailPage({
     installment_group_id: t.installment_group_id ?? null,
     is_recurring:         t.is_recurring ?? null,
     subcategory:          t.subcategory ?? null,
+    tx_type:              (t as any).tx_type ?? null,
   }));
 
-  const cardType = txRows[0]?.account_type ?? "credit_card";
-
-  // ── 2. Card settings
-  const { data: settings } = await supabase
-    .from("card_settings")
-    .select("credit_limit,due_day,closing_day,color")
-    .eq("user_id", user.id)
-    .eq("account_name", cardName)
-    .maybeSingle();
+  // card_settings is the source of truth for type; fall back to transaction data
+  const cardType = (settings?.account_type ?? txRows[0]?.account_type ?? "credit_card") as string;
 
   // ── 3. Future faturas (next 6 months, committed)
   const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);

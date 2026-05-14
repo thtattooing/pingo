@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { loadCategoryRules, descriptionKey } from "@/lib/category-memory";
 
 /* ─────────────────────────────────────────── types */
-type Step = "drop" | "account" | "preview" | "done";
+type Step = "type" | "drop" | "account" | "preview" | "done";
 type AccountType = "credit_card" | "checking";
 
 interface AccountInfo {
@@ -21,6 +21,7 @@ interface ImportRow extends ParsedRow {
   subcategory: string;
   selected: boolean;
   isDupe: boolean;
+  isPossibleDupe: boolean;
   isRecurring: boolean;
   shouldExclude: boolean;
   // installmentTotal, installmentCurrent, installmentGroupKey inherited from ParsedRow
@@ -29,37 +30,63 @@ interface ImportRow extends ParsedRow {
 interface Props {
   userId: string;
   recentHashes: string[];
+  manualDateAmounts: string[];
   existingCards:    { name: string; color: string }[];
   existingAccounts: { name: string; type: string }[];
+  preselectedCard?: { name: string; type: "credit_card" | "checking" };
 }
 
 /* ─────────────────────────────────────────── helpers */
 const BRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
+// Transações que representam liquidação de passivo (pagamento de fatura) ou
+// movimentações patrimoniais entre contas próprias. Não são despesas operacionais
+// e devem ser excluídas do import para evitar dupla contagem.
 const EXCLUDE_KEYWORDS = [
+  // ── Pagamento de fatura (lado extrato conta corrente) ──
   /pagamento\s+(?:de\s+)?(?:fatura|cartao|cart[aã]o)/i,
   /pgto\s+(?:fat|cart[aã]o)/i,
   /pagto\s+fat/i,
-  /fat\s+(?:nubank|c6|inter|bradesco|ita[uú]|santander|xp|btg)/i,
+  /fat\s+(?:nubank|c6|inter|bradesco|ita[uú]|santander|xp|btg|sicredi|safra|original)/i,
   /d[eé]bito\s+autom[aá]tico\s+(?:cartao|cart[aã]o)/i,
+  // Nubank extrato: "Nubank" ou "Nu Pagamentos" como beneficiário do PIX/TED
+  // Sem âncora ^ para capturar "PIX ENVIADO NUBANK S.A." e similares
+  /nu\s+pagamentos\s+s/i,
+  /nubank\s+s\.?\s*a\.?/i,
+  /pix\s+(?:enviado|transf|recebido|agendado).*(?:nubank|nu\s*pag)/i,
+  // Inter extrato: pagamento de cartão via débito automático
+  /banco\s+inter.*cart[aã]o/i,
+  /inter.*fatura/i,
+  /pix\s+(?:enviado|transf).*banco\s+inter/i,
+  /pix\s+(?:enviado|transf).*inter\s+s\.?\s*a/i,
+  // C6 extrato: pagamento da própria fatura
+  /^fatura\s+de\s+cart[aã]o$/i,
+  /^c6\s+bank.*fatura/i,
+  /pix\s+(?:enviado|transf).*c6\s+bank/i,
+  // Padrão genérico: "Pgto cartão" / "Pgt fatura" em qualquer banco
+  /^pgt[oa]?\s+(?:fat|cart)/i,
+  // PIX enviado para pagamento de fatura (sem especificar banco)
+  /pix\s+(?:enviado|transf).*(?:fatura|pagamento\s+de\s+cart)/i,
+
+  // ── Pagamento recebido (lado fatura cartão) ──
+  /^pagamento\s+recebido$/i,
+  /inclus[aã]o\s+de\s+pagamento/i,
+  /pagamento\s+em\s+(?:fatura|conta)/i,
+
+  // ── Transferências entre contas próprias ──
   /transfer[eê]ncia\s+entre\s+contas/i,
   /pix\s+enviado.*voc[eê]\s+mesmo/i,
-  /^pagamento\s+recebido$/i,         // Nubank fatura: bill payment credit row
-  /inclus[aã]o\s+de\s+pagamento/i,   // C6 fatura: bill credit/partial payment
-  /^fatura\s+de\s+cart[aã]o$/i,      // C6 extrato: description when paying card bill
+  /transfer[eê]ncia\s+para\s+conta\s+pr[oó]pria/i,
+
+  // ── Registro manual via PagarFaturaModal ──
+  /^pagamento\s+fatura\s+/i,
 ];
 
 function looksLikeExclude(desc: string): boolean {
   return EXCLUDE_KEYWORDS.some(re => re.test(desc));
 }
 
-function guessAccountType(rows: ParsedRow[]): AccountType {
-  const sample = rows.slice(0, 20);
-  const hasNeg = sample.some(r => r.type === "income");
-  // Credit card statements are all expenses (no income rows)
-  return hasNeg ? "checking" : "credit_card";
-}
 
 function suggestAccountName(bank: string, type: AccountType): string {
   const suffix = type === "credit_card" ? "Crédito" : "Conta Digital";
@@ -79,17 +106,21 @@ function AccountPicker({
 }) {
   const [custom, setCustom] = useState(false);
 
-  const isCredit  = type === "credit_card";
-  const pool      = isCredit ? existingCards : existingAccounts;
-  const hasPool   = pool.length > 0;
+  const isCredit = type === "credit_card";
+  const pool     = isCredit ? existingCards : existingAccounts;
+  const hasPool  = pool.length > 0;
 
-  // If selected name is not in pool, show custom input automatically
-  const inPool    = pool.some(p => p.name === name);
-  const showInput = custom || !hasPool || (name.length > 0 && !inPool);
+  // For credit cards: never allow free text when there are registered cards
+  // (prevents name mismatches that create ghost accounts)
+  // For checking accounts: allow free text even with pool (less critical)
+  const showInput = isCredit
+    ? (!hasPool || custom) && false  // credit: only pool, no free text
+    : (custom || !hasPool);
 
-  const fallbackSuggestions = isCredit
-    ? ["Nubank Crédito","Inter Crédito","C6 Crédito","Bradesco Crédito","Itaú Crédito"]
-    : ["Nubank Conta","Inter Conta","C6 Conta","Bradesco Conta Corrente"];
+  // For credit cards with no registered card: show a hint to create one first
+  const creditNoPool = isCredit && !hasPool;
+
+  const fallbackSuggestions = ["Nubank Conta", "Inter Conta", "C6 Conta", "Bradesco Conta Corrente"];
 
   return (
     <div className="flex flex-col gap-2">
@@ -97,11 +128,24 @@ function AccountPicker({
         {isCredit ? "Selecionar cartão" : "Selecionar conta"}
       </p>
 
+      {/* Credit card with no registered cards → guide to create first */}
+      {creditNoPool && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-2xl"
+          style={{ background: "rgba(244,114,182,0.08)", border: "1px solid rgba(244,114,182,0.25)" }}>
+          <i className="fa-solid fa-circle-info text-sm flex-shrink-0 mt-0.5" style={{ color: "var(--primary)" }} />
+          <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+            Nenhum cartão cadastrado. Vá em{" "}
+            <span className="font-semibold" style={{ color: "var(--foreground)" }}>Cartões → + Criar novo cartão</span>{" "}
+            e depois volte para importar a fatura.
+          </p>
+        </div>
+      )}
+
       {/* Existing cards/accounts as chips */}
       {hasPool && (
         <div className="flex flex-col gap-2">
           {pool.map(p => {
-            const selected = name === p.name && !showInput;
+            const selected = name === p.name;
             const bg = isCredit && "color" in p
               ? (p as { name: string; color: string }).color
               : "#8B5CF6";
@@ -127,22 +171,25 @@ function AccountPicker({
             );
           })}
 
-          <button
-            onClick={() => { setCustom(true); onChange(""); }}
-            className="text-xs text-left px-1"
-            style={{ color: "var(--muted-foreground)" }}>
-            + {isCredit ? "Outro cartão" : "Outra conta"}
-          </button>
+          {/* Contas correntes: permitir nome livre. Cartões: não — risco de mismatch */}
+          {!isCredit && (
+            <button
+              onClick={() => { setCustom(true); onChange(""); }}
+              className="text-xs text-left px-1"
+              style={{ color: "var(--muted-foreground)" }}>
+              + Outra conta
+            </button>
+          )}
         </div>
       )}
 
-      {/* Free-form input when no existing or "Outro" chosen */}
+      {/* Free-form input — somente para contas correntes sem pool ou "Outra" */}
       {showInput && (
         <div>
           <input
             value={name}
             onChange={e => onChange(e.target.value)}
-            placeholder={isCredit ? "Ex: Nubank Roxinho, C6 Crédito…" : "Ex: Inter Conta Digital…"}
+            placeholder="Ex: Inter Conta Digital…"
             className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
             style={{
               background: "var(--input)",
@@ -167,31 +214,44 @@ function AccountPicker({
 }
 
 /* ─────────────────────────────────────────── component */
-export default function ImportarClient({ userId, recentHashes, existingCards, existingAccounts }: Props) {
-  const [step, setStep]           = useState<Step>("drop");
+export default function ImportarClient({ userId, recentHashes, manualDateAmounts, existingCards, existingAccounts, preselectedCard }: Props) {
+  const [step, setStep]           = useState<Step>(preselectedCard ? "drop" : "type");
   const [bankName, setBankName]   = useState("");
   const [rawRows, setRawRows]     = useState<ParsedRow[]>([]);
-  const [account, setAccount]     = useState<AccountInfo>({ type: "credit_card", name: "" });
+  const [account, setAccount]     = useState<AccountInfo>(
+    preselectedCard
+      ? { type: preselectedCard.type, name: preselectedCard.name }
+      : { type: "credit_card", name: "" }
+  );
   const [rows, setRows]           = useState<ImportRow[]>([]);
   const [saving, setSaving]       = useState(false);
-  const [savedCount, setSavedCount] = useState(0);
+  const [savedCount, setSavedCount]         = useState(0);
+  const [futureInstCount, setFutureInstCount] = useState(0);
   const [dragOver, setDragOver]   = useState(false);
   const [parseDebug, setParseDebug] = useState<ParseDebug | null>(null);
   const [saveError, setSaveError]   = useState<string | null>(null);
   const [schemaWarning, setSchemaWarning] = useState(false);
   const [expandedCat, setExpandedCat] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const hashSet = useMemo(() => new Set(recentHashes), [recentHashes]);
+  const hashSet            = useMemo(() => new Set(recentHashes), [recentHashes]);
+  const manualDateAmtSet   = useMemo(() => new Set(manualDateAmounts), [manualDateAmounts]);
 
   /* ── file processing ── */
   function processFile(file: File) {
     const applyResult = (parsed: ReturnType<typeof parseFile>) => {
       const bank = detectBank(file.name);
-      const type = guessAccountType(parsed.rows);
       setBankName(bank);
       setRawRows(parsed.rows);
       setParseDebug(parsed.debug);
-      setAccount({ type, name: suggestAccountName(bank, type) });
+      // Type already chosen explicitly by user (or locked by preselectedCard)
+      if (!preselectedCard) {
+        setAccount(a => {
+          const pool = a.type === "credit_card" ? existingCards : existingAccounts;
+          // Auto-select if there's exactly one option; otherwise suggest a name
+          const autoName = pool.length === 1 ? pool[0].name : suggestAccountName(bank, a.type);
+          return { ...a, name: autoName };
+        });
+      }
       setStep("account");
     };
 
@@ -229,18 +289,22 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
     const rules = await loadCategoryRules(supabase, userId);
 
     const mapped: ImportRow[] = rawRows.map((r, i) => {
-      const excluded = looksLikeExclude(r.description);
-      const hash     = dedup(r);
-      const learned  = rules.get(descriptionKey(r.description));
+      const excluded      = looksLikeExclude(r.description);
+      const hash          = dedup(r);
+      const isDupe        = hashSet.has(hash);
+      const dateAmtKey    = `${r.date}-${Number(r.amount).toFixed(2)}`;
+      const isPossibleDupe = !excluded && !isDupe && manualDateAmtSet.has(dateAmtKey);
+      const learned       = rules.get(descriptionKey(r.description));
       return {
         ...r,
-        uid:           `${i}-${r.date}-${r.amount}`,
-        categoryId:    learned ?? detectCategory(r.description),
-        subcategory:   "",
-        selected:      !excluded && !hashSet.has(hash),
-        isDupe:        hashSet.has(hash),
-        isRecurring:   false,
-        shouldExclude: excluded,
+        uid:            `${i}-${r.date}-${r.amount}`,
+        categoryId:     learned ?? detectCategory(r.description),
+        subcategory:    "",
+        selected:       !excluded && !isDupe,
+        isDupe,
+        isPossibleDupe,
+        isRecurring:    false,
+        shouldExclude:  excluded,
       };
     });
 
@@ -285,6 +349,10 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
     const dedupHash = (r: ImportRow) =>
       `${r.date}-${Number(r.amount).toFixed(2)}-${r.description.slice(0,15).toLowerCase().replace(/[^a-z0-9]/g,"")}`;
 
+    // preselectedCard is the ground truth when coming from a card's import button
+    const finalType = preselectedCard?.type ?? account.type;
+    const finalName = preselectedCard?.name ?? account.name;
+
     const fullPayload = toSave.map(r => ({
       user_id:               userId,
       description:           r.description,
@@ -295,8 +363,8 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
       date:                  r.date,
       is_imported:           true,
       is_recurring:          r.isRecurring,
-      account_type:          account.type,
-      account_name:          account.name,
+      account_type:          finalType,
+      account_name:          finalName,
       tx_type:               r.txType ?? detectTxType(r.description, r.type),
       installments:          r.installmentTotal          ?? 1,
       installment_current:   r.installmentCurrent        ?? 1,
@@ -304,10 +372,10 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
       dedup_hash:            dedupHash(r),
     }));
 
-    // upsert with ignoreDuplicates = ON CONFLICT DO NOTHING (safe to import same file twice)
+    // ignoreDuplicates: false → ON CONFLICT DO UPDATE, so reimporting corrects account_type
     let { error } = await supabase.from("transactions").upsert(fullPayload, {
       onConflict: "user_id,account_name,dedup_hash",
-      ignoreDuplicates: true,
+      ignoreDuplicates: false,
     });
 
     // If columns don't exist yet (schema not migrated), retry with only base columns
@@ -335,23 +403,144 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
       error = fallback.error;
     }
 
-    setSaving(false);
-    if (!error) {
-      setSavedCount(toSave.length);
-      setStep("done");
-    } else {
+    if (error) {
+      setSaving(false);
       setSaveError(error.message ?? "Erro ao salvar. Tente novamente.");
+      return;
     }
+
+    // Auto-generate future installment entries for parcelamentos
+    // e.g. import "TV (2/12)" → also create (3/12)…(12/12) in future months
+    let futureGenCount = 0;
+    const futureRows: object[] = [];
+
+    toSave.forEach(r => {
+      const total   = r.installmentTotal   ?? 1;
+      const current = r.installmentCurrent ?? 1;
+      if (total <= 1 || current >= total) return;
+
+      const groupId   = getGroupId(r);
+      const cleanDesc = r.description.replace(/\s*\(\d+\/\d+\)\s*$/, "").trim();
+      const [oy, om, od] = r.date.split("-").map(Number);
+      const txType    = r.txType ?? detectTxType(r.description, r.type);
+
+      for (let i = 1; i <= total - current; i++) {
+        const instNum    = current + i;
+        let fm = om + i, fy = oy;
+        while (fm > 12) { fm -= 12; fy++; }
+        const maxDay = new Date(fy, fm, 0).getDate();
+        const fd     = Math.min(od, maxDay);
+        const fDate  = `${fy}-${String(fm).padStart(2,"0")}-${String(fd).padStart(2,"0")}`;
+        const fDesc  = `${cleanDesc} (${instNum}/${total})`;
+        const fHash  = `${fDate}-${Number(r.amount).toFixed(2)}-${fDesc.slice(0,15).toLowerCase().replace(/[^a-z0-9]/g,"")}`;
+
+        futureRows.push({
+          user_id:               userId,
+          description:           fDesc,
+          amount:                r.amount,
+          type:                  r.type,
+          category_id:           r.categoryId,
+          subcategory:           r.subcategory || null,
+          date:                  fDate,
+          is_imported:           true,
+          is_recurring:          false,
+          account_type:          finalType,
+          account_name:          finalName,
+          tx_type:               txType,
+          installments:          total,
+          installment_current:   instNum,
+          installment_group_id:  groupId,
+          dedup_hash:            fHash,
+        });
+      }
+    });
+
+    if (futureRows.length > 0) {
+      const { error: futErr } = await supabase
+        .from("transactions")
+        .upsert(futureRows as any, {
+          onConflict: "user_id,account_name,dedup_hash",
+          ignoreDuplicates: true,
+        });
+      if (!futErr) futureGenCount = futureRows.length;
+    }
+
+    setSaving(false);
+    setSavedCount(toSave.length);
+    setFutureInstCount(futureGenCount);
+    setStep("done");
   }
 
-  const selectedCount = rows.filter(r => r.selected).length;
-  const excludedCount = rows.filter(r => r.shouldExclude || r.isDupe).length;
+  const selectedCount   = rows.filter(r => r.selected).length;
+  const excludedCount   = rows.filter(r => r.shouldExclude || r.isDupe).length;
+  const pendingFutInst  = rows
+    .filter(r => r.selected && (r.installmentTotal ?? 1) > 1 && (r.installmentCurrent ?? 1) < (r.installmentTotal ?? 1))
+    .reduce((s, r) => s + ((r.installmentTotal ?? 1) - (r.installmentCurrent ?? 1)), 0);
 
   /* ══════════════════════ RENDER ══════════════════════ */
+
+  /* TYPE PICKER */
+  if (step === "type") return (
+    <div className="flex flex-col gap-4 animate-fade-in-up">
+      <p className="text-sm font-medium px-1">O que você quer importar?</p>
+
+      <button
+        onClick={() => { setAccount(a => ({ ...a, type: "credit_card" })); setStep("drop"); }}
+        className="flex items-center gap-4 p-5 rounded-3xl text-left transition-all active:scale-95"
+        style={{ background: "var(--card)", border: "1.5px solid var(--border)" }}
+      >
+        <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
+          style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", boxShadow: "0 4px 14px rgba(244,114,182,0.35)" }}>
+          <i className="fa-solid fa-credit-card text-xl text-white" />
+        </div>
+        <div className="flex-1">
+          <p className="font-semibold text-sm">Fatura de cartão de crédito</p>
+          <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+            Nubank, Inter, C6, Bradesco, Itaú...
+          </p>
+        </div>
+        <i className="fa-solid fa-chevron-right text-xs" style={{ color: "var(--muted-foreground)" }} />
+      </button>
+
+      <button
+        onClick={() => { setAccount(a => ({ ...a, type: "checking" })); setStep("drop"); }}
+        className="flex items-center gap-4 p-5 rounded-3xl text-left transition-all active:scale-95"
+        style={{ background: "var(--card)", border: "1.5px solid var(--border)" }}
+      >
+        <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
+          style={{ background: "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)", boxShadow: "0 4px 14px rgba(99,102,241,0.3)" }}>
+          <i className="fa-solid fa-building-columns text-xl text-white" />
+        </div>
+        <div className="flex-1">
+          <p className="font-semibold text-sm">Extrato de conta corrente</p>
+          <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+            Conta digital, poupança, conta corrente
+          </p>
+        </div>
+        <i className="fa-solid fa-chevron-right text-xs" style={{ color: "var(--muted-foreground)" }} />
+      </button>
+    </div>
+  );
 
   /* DROP */
   if (step === "drop") return (
     <div className="flex flex-col gap-5">
+      {/* Type badge — shows what was chosen, tap to go back */}
+      {!preselectedCard && (
+        <button
+          onClick={() => setStep("type")}
+          className="flex items-center gap-2 self-start px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+          style={{
+            background: account.type === "credit_card" ? "rgba(244,114,182,0.12)" : "rgba(99,102,241,0.12)",
+            color: account.type === "credit_card" ? "var(--primary)" : "#6366F1",
+          }}
+        >
+          <i className={`fa-solid ${account.type === "credit_card" ? "fa-credit-card" : "fa-building-columns"} text-[10px]`} />
+          {account.type === "credit_card" ? "Fatura de cartão" : "Extrato conta corrente"}
+          <i className="fa-solid fa-xmark text-[9px] opacity-60" />
+        </button>
+      )}
+
       <div
         onDrop={onDrop}
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
@@ -370,7 +559,9 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
           <i className="fa-solid fa-file-arrow-up text-2xl text-white" />
         </div>
         <div>
-          <p className="font-semibold text-base">Soltar extrato aqui</p>
+          <p className="font-semibold text-base">
+            {account.type === "credit_card" ? "Soltar fatura aqui" : "Soltar extrato aqui"}
+          </p>
           <p className="text-sm mt-1" style={{ color: "var(--muted-foreground)" }}>Ou toque para selecionar</p>
         </div>
         <div className="flex gap-2 flex-wrap justify-center">
@@ -481,41 +672,39 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
 
         {rawRows.length > 0 && (
         <>
-        <p className="text-sm font-medium">Qual é este extrato?</p>
+        <p className="text-sm font-medium">
+          {account.type === "credit_card" ? "Qual cartão é este?" : "Qual conta é esta?"}
+        </p>
 
-        {/* Account type */}
-        <div className="grid grid-cols-2 gap-3">
-          {([
-            { type: "credit_card" as AccountType, icon: "fa-credit-card",    label: "Fatura de\ncartão crédito" },
-            { type: "checking"    as AccountType, icon: "fa-building-columns", label: "Extrato conta\ncorrente/poupança" },
-          ] as const).map(opt => (
-            <button
-              key={opt.type}
-              onClick={() => setAccount(a => ({ ...a, type: opt.type, name: suggestAccountName(bankName, opt.type) }))}
-              className="flex flex-col items-center gap-2 p-4 rounded-2xl transition-all"
-              style={{
-                background:  account.type === opt.type ? "rgba(244,114,182,0.12)" : "var(--muted)",
-                border:      `1px solid ${account.type === opt.type ? "var(--primary)" : "transparent"}`,
-              }}
+        {/* Account / Card picker — travado se veio do detalhe do cartão */}
+        {preselectedCard ? (
+          <div
+            className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+            style={{ background: "rgba(244,114,182,0.08)", border: "1px solid rgba(244,114,182,0.25)" }}
+          >
+            <span
+              className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{ background: "var(--primary)" }}
             >
-              <i className={`fa-solid ${opt.icon} text-xl`}
-                style={{ color: account.type === opt.type ? "var(--primary)" : "var(--muted-foreground)" }} />
-              <span className="text-xs text-center leading-snug whitespace-pre-line font-medium"
-                style={{ color: account.type === opt.type ? "var(--foreground)" : "var(--muted-foreground)" }}>
-                {opt.label}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {/* Account / Card picker */}
-        <AccountPicker
-          type={account.type}
-          name={account.name}
-          existingCards={existingCards}
-          existingAccounts={existingAccounts}
-          onChange={name => setAccount(a => ({ ...a, name }))}
-        />
+              <i className="fa-solid fa-credit-card text-xs text-white" />
+            </span>
+            <div className="flex-1">
+              <p className="text-sm font-semibold">{preselectedCard.name}</p>
+              <p className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>
+                Fatura será importada para este cartão
+              </p>
+            </div>
+            <i className="fa-solid fa-lock text-xs" style={{ color: "var(--primary)" }} />
+          </div>
+        ) : (
+          <AccountPicker
+            type={account.type}
+            name={account.name}
+            existingCards={existingCards}
+            existingAccounts={existingAccounts}
+            onChange={name => setAccount(a => ({ ...a, name }))}
+          />
+        )}
 
         {/* Info notice */}
         <div className="flex items-start gap-2 rounded-xl px-3 py-2.5"
@@ -527,17 +716,34 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
           </p>
         </div>
 
-        <button onClick={runPreview} className="w-full py-4 rounded-2xl font-semibold text-sm btn-primary">
-          <i className="fa-solid fa-eye mr-2" />
-          Ver transações
-        </button>
+        {/* Bloquear se cartão de crédito sem cartão cadastrado e sem preselectedCard */}
+        {(() => {
+          const needsCard = account.type === "credit_card" && !preselectedCard && existingCards.length === 0;
+          return (
+            <button
+              onClick={runPreview}
+              disabled={needsCard}
+              className="w-full py-4 rounded-2xl font-semibold text-sm btn-primary disabled:opacity-40">
+              <i className="fa-solid fa-eye mr-2" />
+              {needsCard ? "Crie um cartão primeiro" : "Ver transações"}
+            </button>
+          );
+        })()}
         </>
         )}
 
-        <button onClick={() => setStep("drop")} className="text-xs text-center"
-          style={{ color: "var(--muted-foreground)" }}>
-          ← Trocar arquivo
-        </button>
+        <div className="flex justify-between">
+          {!preselectedCard && (
+            <button onClick={() => setStep("type")} className="text-xs"
+              style={{ color: "var(--muted-foreground)" }}>
+              ← Trocar tipo
+            </button>
+          )}
+          <button onClick={() => setStep("drop")} className="text-xs ml-auto"
+            style={{ color: "var(--muted-foreground)" }}>
+            ← Trocar arquivo
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -554,8 +760,15 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
         <p className="text-sm mt-1" style={{ color: "var(--muted-foreground)" }}>
           {savedCount} transações importadas · {account.name}
         </p>
+        {futureInstCount > 0 && (
+          <p className="text-xs mt-2 px-4 py-2 rounded-xl"
+            style={{ background: "rgba(99,102,241,0.1)", color: "#6366F1" }}>
+            <i className="fa-solid fa-calendar-days mr-1.5" />
+            {futureInstCount} parcela{futureInstCount !== 1 ? "s" : ""} futura{futureInstCount !== 1 ? "s" : ""} criada{futureInstCount !== 1 ? "s" : ""} automaticamente
+          </p>
+        )}
       </div>
-      <button onClick={() => { setStep("drop"); setRows([]); setRawRows([]); setSavedCount(0); }}
+      <button onClick={() => { setStep(preselectedCard ? "drop" : "type"); setRows([]); setRawRows([]); setSavedCount(0); setFutureInstCount(0); }}
         className="btn-primary py-3 px-8">
         <i className="fa-solid fa-file-arrow-up mr-2" />Importar outro arquivo
       </button>
@@ -620,9 +833,11 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
                 ? "rgba(100,116,139,0.15)"
                 : row.isDupe
                   ? "rgba(251,191,36,0.25)"
-                  : row.selected
-                    ? "var(--border)"
-                    : "rgba(255,255,255,0.04)"}`,
+                  : row.isPossibleDupe && row.selected
+                    ? "rgba(251,191,36,0.4)"
+                    : row.selected
+                      ? "var(--border)"
+                      : "rgba(255,255,255,0.04)"}`,
               opacity: isIgnored ? 0.4 : !row.selected ? 0.45 : 1,
             }}
           >
@@ -639,7 +854,8 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
               >
                 {row.shouldExclude && <i className="fa-solid fa-ban text-[8px]" style={{ color: "var(--muted-foreground)" }} />}
                 {row.isDupe && <i className="fa-solid fa-minus text-[8px]" style={{ color: "var(--gold)" }} />}
-                {!isIgnored && row.selected && <i className="fa-solid fa-check text-[9px] text-white" />}
+                {!isIgnored && row.selected && !row.isPossibleDupe && <i className="fa-solid fa-check text-[9px] text-white" />}
+                {!isIgnored && row.selected && row.isPossibleDupe && <i className="fa-solid fa-triangle-exclamation text-[9px]" style={{ color: "var(--gold)" }} />}
               </button>
 
               {/* Category badge — tap to expand picker */}
@@ -664,6 +880,7 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
                   {row.subcategory && <span className="ml-1 capitalize"> · {row.subcategory}</span>}
                   {row.shouldExclude && <span className="ml-1" style={{ color: "var(--muted-foreground)" }}> · pag. fatura (ignorado)</span>}
                   {row.isDupe && <span className="ml-1" style={{ color: "var(--gold)" }}> · já importado</span>}
+                  {row.isPossibleDupe && <span className="ml-1" style={{ color: "var(--gold)" }}> · verificar duplicata</span>}
                 </p>
               </div>
 
@@ -742,7 +959,14 @@ export default function ImportarClient({ userId, recentHashes, existingCards, ex
       )}
 
       {/* Confirm button */}
-      <div className="sticky bottom-20 py-2">
+      <div className="sticky bottom-20 py-2 flex flex-col gap-2">
+        {pendingFutInst > 0 && (
+          <p className="text-center text-xs px-3 py-2 rounded-xl"
+            style={{ background: "rgba(99,102,241,0.08)", color: "#6366F1", border: "1px solid rgba(99,102,241,0.2)" }}>
+            <i className="fa-solid fa-rotate mr-1.5" />
+            {pendingFutInst} parcela{pendingFutInst !== 1 ? "s" : ""} futura{pendingFutInst !== 1 ? "s" : ""} serão criadas automaticamente
+          </p>
+        )}
         <button onClick={handleImport} disabled={saving || selectedCount === 0}
           className="w-full py-4 rounded-2xl font-semibold text-sm btn-primary disabled:opacity-40">
           {saving

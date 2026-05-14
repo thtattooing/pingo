@@ -6,6 +6,9 @@ import CategoryBar from "@/components/CategoryBar";
 import TransactionList from "@/components/TransactionList";
 import MonthNav from "@/components/MonthNav";
 import ThemeToggle from "@/components/ThemeToggle";
+import EyeToggle from "@/components/EyeToggle";
+import CaixaLivreCard from "@/components/CaixaLivreCard";
+import SubscriptionCard from "@/components/SubscriptionCard";
 import { CATEGORIES } from "@/lib/categories";
 import Link from "next/link";
 import { BRL } from "@/lib/formatters";
@@ -48,11 +51,39 @@ export default async function HomePage({
     }
   }
 
-  const { data: goalRows } = await supabase
-    .from("goals")
-    .select("category_id,limit_amount")
-    .eq("user_id", user.id)
-    .eq("month", month).eq("year", year);
+  const today30 = new Date();
+  today30.setDate(today30.getDate() + 30);
+  const date30 = today30.toISOString().split("T")[0];
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  const [{ data: goalRows }, { data: bankMeta }, { data: checkingTxRows }, { data: next30Rows }] = await Promise.all([
+    supabase
+      .from("goals")
+      .select("category_id,limit_amount")
+      .eq("user_id", user.id)
+      .eq("month", month).eq("year", year),
+
+    supabase
+      .from("bank_accounts")
+      .select("initial_balance")
+      .eq("user_id", user.id),
+
+    supabase
+      .from("transactions")
+      .select("amount,type,tx_type")
+      .eq("user_id", user.id)
+      .neq("account_type", "credit_card"),
+
+    supabase
+      .from("transactions")
+      .select("amount")
+      .eq("user_id", user.id)
+      .eq("account_type", "credit_card")
+      .eq("type", "expense")
+      .neq("tx_type", "transfer_internal")
+      .gt("date", todayStr)
+      .lte("date", date30),
+  ]);
 
   const txList   = txRows ?? [];
   const goalList = goalRows ?? [];
@@ -89,6 +120,35 @@ export default async function HomePage({
     .filter(t => t.type === "expense" && t.is_recurring)
     .reduce((s, t) => s + Number(t.amount), 0);
 
+  // Caixa Livre (Etapa 1)
+  const initialBalance  = (bankMeta ?? []).reduce((s, a) => s + Number(a.initial_balance ?? 0), 0);
+  const checkingIncome  = (checkingTxRows ?? []).filter(t => t.type === "income"  && t.tx_type !== "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
+  const checkingExpense = (checkingTxRows ?? []).filter(t => t.type === "expense" && t.tx_type !== "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
+  const checkingBalance = initialBalance + checkingIncome - checkingExpense;
+
+  const ccMonthExpense  = txList.filter(t => t.account_type === "credit_card" && t.type === "expense" && t.tx_type !== "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
+  const ccMonthPayments = txList.filter(t => t.account_type === "credit_card" && t.type === "income"  && t.tx_type === "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
+  const ccNetFatura     = Math.max(0, ccMonthExpense - ccMonthPayments);
+  const next30dCC       = (next30Rows ?? []).reduce((s, t) => s + Number(t.amount), 0);
+
+  // Subscriptions (Etapa 4)
+  const recurringTx = txList.filter(t => t.type === "expense" && t.is_recurring);
+  const subMap = new Map<string, number>();
+  const subCat = new Map<string, string>();
+  recurringTx.forEach(t => {
+    const key = (t.description ?? "").toLowerCase().trim();
+    subMap.set(key, (subMap.get(key) ?? 0) + Number(t.amount));
+    if (!subCat.has(key)) subCat.set(key, t.category_id ?? "outros");
+  });
+  const subscriptions = Array.from(subMap.entries())
+    .map(([key, amount]) => {
+      const catId = subCat.get(key) ?? "outros";
+      const cat   = CATEGORIES.find(c => c.id === catId) ?? CATEGORIES[CATEGORIES.length - 1];
+      const rawDesc = recurringTx.find(t => (t.description ?? "").toLowerCase().trim() === key)?.description ?? key;
+      return { description: rawDesc, amount, category: catId, categoryIcon: cat.icon, categoryColor: cat.color };
+    })
+    .sort((a, b) => b.amount - a.amount);
+
   const transactions = txList.slice(0, 15).map(t => ({
     id:                 t.id,
     description:        t.description,
@@ -122,6 +182,7 @@ export default async function HomePage({
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <EyeToggle />
             <ThemeToggle />
             <Link href="/configuracoes"
               className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
@@ -153,6 +214,14 @@ export default async function HomePage({
 
       <div className="flex-1 overflow-y-auto px-5 pb-4 flex flex-col gap-4">
         <BalanceCard balance={balance} income={income} expense={expense} userName={userName} />
+
+        <CaixaLivreCard
+          checkingBalance={checkingBalance}
+          ccNetFatura={ccNetFatura}
+          next30dCC={next30dCC}
+        />
+
+        {subscriptions.length > 0 && <SubscriptionCard subscriptions={subscriptions} />}
 
         {accounts.length > 0 && (
           <div className="flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
@@ -190,6 +259,34 @@ export default async function HomePage({
         {categorySummary.length > 0 && (
           <CategoryBar categories={categorySummary} total={totalExpense} />
         )}
+
+        {/* Ações rápidas */}
+        <div className="flex gap-3">
+          <Link href="/importar"
+            className="flex-1 flex items-center gap-3 rounded-2xl px-4 py-3 no-underline transition-all active:scale-95"
+            style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: "rgba(99,102,241,0.12)" }}>
+              <i className="fa-solid fa-file-arrow-up text-sm" style={{ color: "#818CF8" }} />
+            </div>
+            <div>
+              <p className="text-xs font-semibold leading-tight">Importar</p>
+              <p className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>extrato / fatura</p>
+            </div>
+          </Link>
+          <Link href="/ir"
+            className="flex-1 flex items-center gap-3 rounded-2xl px-4 py-3 no-underline transition-all active:scale-95"
+            style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: "rgba(251,191,36,0.12)" }}>
+              <i className="fa-solid fa-landmark text-sm" style={{ color: "var(--gold)" }} />
+            </div>
+            <div>
+              <p className="text-xs font-semibold leading-tight">Receita Federal</p>
+              <p className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>declaração IR</p>
+            </div>
+          </Link>
+        </div>
 
         <Link href="/lancamento"
           className="card-pingo flex items-center gap-4 active:scale-95 transition-transform no-underline"

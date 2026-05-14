@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
-import IRPrintButton from "./IRPrintButton";
+import IRExportButtons from "./IRExportButtons";
 
 const BRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
@@ -80,13 +80,14 @@ export default async function IRPage({
   const ano    = parseInt(params.ano ?? String(now.getFullYear() - 1));
   const years  = [now.getFullYear() - 1, now.getFullYear() - 2, now.getFullYear()];
 
-  // Fetch all transactions for the selected year
-  const { data: txRows } = await supabase
-    .from("transactions")
-    .select("amount, type, category_id")
-    .eq("user_id", user.id)
-    .gte("date", `${ano}-01-01`)
-    .lte("date", `${ano}-12-31`);
+  const [{ data: txRows }, { data: bensInvest }, { data: bensMetas }] = await Promise.all([
+    supabase.from("transactions")
+      .select("amount, type, category_id, description, date")
+      .eq("user_id", user.id)
+      .gte("date", `${ano}-01-01`).lte("date", `${ano}-12-31`),
+    supabase.from("investments").select("name, type, amount").eq("user_id", user.id),
+    supabase.from("savings_goals").select("name, target_amount, current_amount").eq("user_id", user.id),
+  ]);
 
   const txList = txRows ?? [];
 
@@ -96,6 +97,9 @@ export default async function IRPage({
     const key = `${t.category_id ?? "outros"}__${t.type}`;
     catTotals.set(key, (catTotals.get(key) ?? 0) + Number(t.amount));
   });
+
+  const totalBensInvest = (bensInvest ?? []).reduce((s, i) => s + Number(i.amount), 0);
+  const totalBensMetas  = (bensMetas  ?? []).reduce((s, g) => s + Number(g.current_amount), 0);
 
   // Calculate totals for each IR field
   const irData = IR_FIELDS.map(field => {
@@ -297,9 +301,59 @@ export default async function IRPage({
           ))}
         </div>
 
-        {/* Export button */}
+        {/* Bens e Direitos */}
+        {(totalBensInvest > 0 || totalBensMetas > 0) && (
+          <div className="card-pingo flex flex-col gap-3">
+            <div className="flex items-start gap-3">
+              <span className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: "rgba(99,102,241,0.15)" }}>
+                <i className="fa-solid fa-landmark" style={{ color: "#6366F1" }} />
+              </span>
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold">Bens e Direitos</p>
+                  <p className="mono-data text-base font-semibold" style={{ color: "#6366F1" }}>
+                    {BRL(totalBensInvest + totalBensMetas)}
+                  </p>
+                </div>
+                <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+                  Investimentos, poupança e reservas declaradas no PINGO
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 rounded-xl px-3 py-2"
+              style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
+              <i className="fa-solid fa-location-dot text-xs flex-shrink-0" style={{ color: "#6366F1" }} />
+              <p className="text-[11px] font-medium" style={{ color: "#6366F1" }}>
+                Ficha 7 — Bens e Direitos (Grupo 04 — Aplicações e Investimentos)
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {(bensInvest ?? []).map((inv, i) => (
+                <div key={i} className="flex justify-between text-xs">
+                  <span style={{ color: "var(--muted-foreground)" }}>{inv.name}</span>
+                  <span className="mono-data font-medium">{BRL(Number(inv.amount))}</span>
+                </div>
+              ))}
+              {(bensMetas ?? []).filter(g => g.current_amount > 0).map((g, i) => (
+                <div key={i} className="flex justify-between text-xs">
+                  <span style={{ color: "var(--muted-foreground)" }}>{g.name} (reserva)</span>
+                  <span className="mono-data font-medium">{BRL(Number(g.current_amount))}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Export buttons */}
         <div className="no-print">
-          <IRPrintButton />
+          <IRExportButtons
+            ano={ano}
+            userName={userName}
+            irData={irData}
+            bensInvest={bensInvest ?? []}
+            bensMetas={bensMetas ?? []}
+          />
         </div>
 
         <div className="no-print h-2" />

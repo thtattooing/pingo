@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { CATEGORIES } from "@/lib/categories";
 import { BRL, formatDate, MONTH_NAMES } from "@/lib/formatters";
 import AddToCardModal from "@/app/cartoes/AddToCardModal";
@@ -23,6 +24,7 @@ interface CardTx {
   installment_group_id: string | null;
   is_recurring: boolean | null;
   subcategory: string | null;
+  tx_type: string | null;
 }
 
 interface CardSettings {
@@ -121,17 +123,24 @@ function PagarFaturaModal({
 
   useEffect(() => {
     const supabase = createClient();
-    supabase
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .from("transactions" as any)
-      .select("account_name")
-      .eq("account_type", "checking")
-      .not("account_name", "is", null)
-      .then(({ data }: { data: { account_name: string }[] | null }) => {
-        const names = [...new Set((data ?? []).map(t => t.account_name))].filter(Boolean);
-        setAccounts(names);
-        if (names.length > 0) setFromAccount(names[0]);
-      });
+    // Fonte primária: card_settings (contas criadas explicitamente)
+    // Fallback: transactions (contas que só existem via importação)
+    Promise.all([
+      supabase.from("card_settings" as any)
+        .select("account_name")
+        .eq("account_type", "checking")
+        .not("account_name", "is", null),
+      supabase.from("transactions" as any)
+        .select("account_name")
+        .eq("account_type", "checking")
+        .not("account_name", "is", null),
+    ]).then(([{ data: settingsData }, { data: txData }]) => {
+      const fromSettings = (settingsData ?? []).map((r: any) => r.account_name as string);
+      const fromTx       = (txData       ?? []).map((r: any) => r.account_name as string);
+      const names = [...new Set([...fromSettings, ...fromTx])].filter(Boolean);
+      setAccounts(names);
+      if (names.length > 0) setFromAccount(names[0]);
+    });
   }, []);
 
   async function handlePagar() {
@@ -143,19 +152,34 @@ function PagarFaturaModal({
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setError("Sessão expirada."); setSaving(false); return; }
 
-    const { error: err } = await supabase.from("transactions").insert({
-      user_id:      user.id,
-      description:  `Pagamento fatura ${cardName}`,
-      amount:       parsedAmount,
-      type:         "expense",
-      category_id:  "moradia", // generic category for bill payment
-      tx_type:      "transfer_internal",
-      account_type: "checking",
-      account_name: fromAccount,
-      date,
-      is_imported:  false,
-      is_recurring: false,
-    });
+    const { error: err } = await supabase.from("transactions").insert([
+      {
+        user_id:      user.id,
+        description:  `Pagamento fatura ${cardName}`,
+        amount:       parsedAmount,
+        type:         "expense",
+        category_id:  null,
+        tx_type:      "transfer_internal",
+        account_type: "checking",
+        account_name: fromAccount,
+        date,
+        is_imported:  false,
+        is_recurring: false,
+      },
+      {
+        user_id:      user.id,
+        description:  `Pagamento fatura ${cardName}`,
+        amount:       parsedAmount,
+        type:         "income",
+        category_id:  null,
+        tx_type:      "transfer_internal",
+        account_type: "credit_card",
+        account_name: cardName,
+        date,
+        is_imported:  false,
+        is_recurring: false,
+      },
+    ] as any);
 
     setSaving(false);
     if (err) { setError(err.message); return; }
@@ -286,9 +310,11 @@ export default function CardDetailClient({
     return d.getFullYear() === selYear && (d.getMonth() + 1) === selMonth;
   }), [allTransactions, selMonth, selYear]);
 
-  const fatura   = monthTx.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-  const creditos = monthTx.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const utilPct  = settings?.credit_limit ? Math.min((fatura / settings.credit_limit) * 100, 100) : 0;
+  const fatura    = monthTx.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const payments  = monthTx.filter(t => t.type === "income" && t.tx_type === "transfer_internal").reduce((s, t) => s + t.amount, 0);
+  const creditos  = monthTx.filter(t => t.type === "income" && t.tx_type !== "transfer_internal").reduce((s, t) => s + t.amount, 0);
+  const netFatura = Math.max(0, fatura - payments);
+  const utilPct   = settings?.credit_limit ? Math.min((netFatura / settings.credit_limit) * 100, 100) : 0;
 
   function prevMonth() {
     if (selMonth === 1) { setSelMonth(12); setSelYear(y => y - 1); }
@@ -322,7 +348,7 @@ export default function CardDetailClient({
         <div className="flex items-end justify-between">
           <div>
             <p className="text-white/60 text-xs mb-0.5">Fatura {MONTH_NAMES[selMonth - 1]}</p>
-            <p className="text-white text-2xl font-bold mono-data">{BRL(fatura)}</p>
+            <p className="text-white text-2xl font-bold mono-data">{BRL(netFatura)}</p>
           </div>
           {settings?.due_day && (
             <div className="text-right">
@@ -388,16 +414,24 @@ export default function CardDetailClient({
       {tab === "fatura" && (
         <div className="px-5 flex flex-col gap-3">
           {/* Summary row */}
-          {creditos > 0 && (
+          {(payments > 0 || creditos > 0) && (
             <div className="flex gap-3">
               <div className="flex-1 rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
                 <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Compras</p>
                 <p className="mono-data text-sm font-semibold" style={{ color: "var(--expense)" }}>{BRL(fatura)}</p>
               </div>
-              <div className="flex-1 rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-                <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Pagamentos</p>
-                <p className="mono-data text-sm font-semibold" style={{ color: "var(--income)" }}>{BRL(creditos)}</p>
-              </div>
+              {payments > 0 && (
+                <div className="flex-1 rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                  <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Pago</p>
+                  <p className="mono-data text-sm font-semibold" style={{ color: "var(--income)" }}>{BRL(payments)}</p>
+                </div>
+              )}
+              {creditos > 0 && (
+                <div className="flex-1 rounded-2xl px-4 py-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                  <p className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Créditos</p>
+                  <p className="mono-data text-sm font-semibold" style={{ color: "var(--income)" }}>{BRL(creditos)}</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -421,21 +455,34 @@ export default function CardDetailClient({
 
           {/* Action buttons */}
           <div className="flex gap-3">
-            <button onClick={() => setShowAdd(true)}
+            <Link
+              href={`/importar?card=${encodeURIComponent(cardName)}&type=${cardType}`}
+              className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-semibold no-underline"
+              style={{ background: "var(--card)", color: "var(--foreground)", border: `1.5px solid ${color}50` }}
+            >
+              <i className="fa-solid fa-file-arrow-up text-xs" style={{ color }} />
+              Importar fatura
+            </Link>
+            <button
+              onClick={() => setShowAdd(true)}
               className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-semibold"
-              style={{ background: gradBg, color: "#fff" }}>
+              style={{ background: gradBg, color: "#fff" }}
+            >
               <i className="fa-solid fa-plus text-xs" />
-              Adicionar
+              Novo gasto
             </button>
-            {fatura > 0 && (
-              <button onClick={() => setShowPagar(true)}
-                className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-semibold"
-                style={{ background: "var(--card)", color: "var(--foreground)", border: `1.5px solid ${color}60` }}>
-                <i className="fa-solid fa-money-bill-wave text-xs" style={{ color }} />
-                Pagar fatura
-              </button>
-            )}
           </div>
+
+          {netFatura > 0 && (
+            <button
+              onClick={() => setShowPagar(true)}
+              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-semibold"
+              style={{ background: "var(--card)", color: "var(--foreground)", border: `1.5px solid ${color}40` }}
+            >
+              <i className="fa-solid fa-money-bill-wave text-xs" style={{ color }} />
+              Pagar fatura · {BRL(netFatura)}
+            </button>
+          )}
         </div>
       )}
 
@@ -598,7 +645,7 @@ export default function CardDetailClient({
       {showPagar && (
         <PagarFaturaModal
           cardName={cardName}
-          fatura={fatura}
+          fatura={netFatura}
           color={color}
           selMonth={selMonth}
           selYear={selYear}

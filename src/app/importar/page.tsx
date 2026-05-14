@@ -3,10 +3,19 @@ import { redirect } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
 import ImportarClient from "./ImportarClient";
 
-export default async function ImportarPage() {
+export default async function ImportarPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ card?: string; type?: string }>;
+}) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  const sp = await searchParams;
+  const preselectedCard = sp?.card
+    ? { name: decodeURIComponent(sp.card), type: (sp.type === "checking" ? "checking" : "credit_card") as "credit_card" | "checking" }
+    : undefined;
 
   // Fetch last 180 days to detect duplicates (covers 6-month statements)
   const since = new Date();
@@ -14,13 +23,19 @@ export default async function ImportarPage() {
 
   const { data: recent } = await supabase
     .from("transactions")
-    .select("date, amount, description")
+    .select("date, amount, description, is_imported")
     .eq("user_id", user.id)
+    .not("account_name", "is", null)
     .gte("date", since.toISOString().split("T")[0]);
 
   const recentHashes = (recent ?? []).map(t =>
     `${t.date}-${Number(t.amount).toFixed(2)}-${String(t.description ?? "").slice(0, 15).toLowerCase().replace(/[^a-z0-9]/g, "")}`
   );
+
+  // date+amount keys for manually-entered transactions — used to flag possible import dupes
+  const manualDateAmounts = (recent ?? [])
+    .filter(t => !(t as any).is_imported)
+    .map(t => `${t.date}-${Number(t.amount).toFixed(2)}`);
 
   // Existing cards and accounts so the import picker can show them
   const [{ data: cardRows }, { data: accountRows }] = await Promise.all([
@@ -38,10 +53,12 @@ export default async function ImportarPage() {
           className="text-2xl font-normal leading-tight"
           style={{ fontFamily: "var(--font-calistoga)" }}
         >
-          Importar extrato
+          {preselectedCard ? "Importar fatura" : "Importar extrato"}
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--muted-foreground)" }}>
-          Nubank, Inter, C6 — CSV e OFX
+          {preselectedCard
+            ? <><i className="fa-solid fa-credit-card mr-1.5" style={{ color: "var(--primary)" }} />{preselectedCard.name}</>
+            : "Nubank, Inter, C6 — CSV e OFX"}
         </p>
       </header>
 
@@ -49,8 +66,10 @@ export default async function ImportarPage() {
         <ImportarClient
           userId={user.id}
           recentHashes={recentHashes}
+          manualDateAmounts={manualDateAmounts}
           existingCards={existingCards}
           existingAccounts={existingAccounts}
+          preselectedCard={preselectedCard}
         />
       </div>
 

@@ -8,13 +8,14 @@ import { parseMonthParam } from "@/lib/month-utils";
 export default async function CartoesPage({
   searchParams,
 }: {
-  searchParams?: { settings?: string; m?: string };
+  searchParams?: Promise<{ settings?: string; m?: string }>;
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { month, year } = parseMonthParam(searchParams?.m);
+  const sp = await searchParams;
+  const { month, year } = parseMonthParam(sp?.m);
 
   const mStart = `${year}-${String(month).padStart(2, "0")}-01`;
   const mEnd   = month === 12
@@ -31,7 +32,7 @@ export default async function CartoesPage({
 
   const [{ data: curTx }, { data: nextTx }, { data: settingsRows }, { data: allAccounts }] = await Promise.all([
     supabase.from("transactions")
-      .select("account_name,account_type,amount,type")
+      .select("account_name,account_type,amount,type,tx_type")
       .eq("user_id", user.id)
       .gte("date", mStart).lt("date", mEnd),
     supabase.from("transactions")
@@ -40,9 +41,8 @@ export default async function CartoesPage({
       .gte("date", nextStart).lt("date", nextEnd)
       .eq("type" as never, "expense"),
     supabase.from("card_settings")
-      .select("account_name,credit_limit,due_day,closing_day,color")
+      .select("account_name,credit_limit,due_day,closing_day,color,brand,account_type")
       .eq("user_id", user.id),
-    // Buscar todos os account_names históricos para mostrar contas sem mov. no mês
     supabase.from("transactions")
       .select("account_name,account_type")
       .eq("user_id", user.id)
@@ -53,8 +53,10 @@ export default async function CartoesPage({
   type CardData = {
     name: string;
     type: string;
+    brand: string;
     currentFatura: number;
     currentCreditos: number;
+    currentPayments: number;
     nextFatura: number;
     creditLimit: number;
     dueDay: number;
@@ -67,16 +69,19 @@ export default async function CartoesPage({
   const addCard = (name: string, type: string) => {
     if (!cardMap.has(name)) {
       const s = settingsRows?.find(s => s.account_name === name);
+      const resolvedType = s?.account_type ?? type;
       cardMap.set(name, {
         name,
-        type,
+        type:            resolvedType,
+        brand:           s?.brand         ?? "visa",
         currentFatura:   0,
         currentCreditos: 0,
+        currentPayments: 0,
         nextFatura:      0,
         creditLimit:     s?.credit_limit  ?? 0,
         dueDay:          s?.due_day       ?? 0,
         closingDay:      s?.closing_day   ?? 20,
-        color:           s?.color         ?? (type === "credit_card" ? "#F472B6" : "#8B5CF6"),
+        color:           s?.color         ?? (resolvedType === "credit_card" ? "#F472B6" : "#8B5CF6"),
       });
     }
   };
@@ -85,8 +90,13 @@ export default async function CartoesPage({
     if (!t.account_name) return;
     addCard(t.account_name, t.account_type ?? "checking");
     const c = cardMap.get(t.account_name)!;
-    if (t.type === "expense") c.currentFatura   += Number(t.amount);
-    else                      c.currentCreditos += Number(t.amount);
+    if (t.type === "expense") {
+      c.currentFatura += Number(t.amount);
+    } else if (t.type === "income" && t.tx_type === "transfer_internal") {
+      c.currentPayments += Number(t.amount);
+    } else {
+      c.currentCreditos += Number(t.amount);
+    }
   });
 
   (nextTx ?? []).forEach(t => {
@@ -102,9 +112,9 @@ export default async function CartoesPage({
     seenNames.add(t.account_name);
     addCard(t.account_name, t.account_type ?? "checking");
   });
-  // Contas só em card_settings (configuradas mas sem transações ainda)
+  // Contas só em card_settings (criadas manualmente, sem transações ainda)
   (settingsRows ?? []).forEach(s => {
-    if (!cardMap.has(s.account_name)) addCard(s.account_name, "credit_card");
+    if (!cardMap.has(s.account_name)) addCard(s.account_name, s.account_type ?? "credit_card");
   });
 
   const cards = Array.from(cardMap.values()).sort((a, b) => {
@@ -113,8 +123,8 @@ export default async function CartoesPage({
     return b.currentFatura - a.currentFatura;
   });
 
-  const openSettings = searchParams?.settings
-    ? decodeURIComponent(searchParams.settings)
+  const openSettings = sp?.settings
+    ? decodeURIComponent(sp.settings)
     : null;
 
   return (

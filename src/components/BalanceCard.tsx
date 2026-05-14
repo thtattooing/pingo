@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
+import { usePrivacy } from "@/hooks/usePrivacy";
 
 interface BalanceCardProps {
   balance: number;
@@ -20,7 +21,7 @@ function formatBRL(value: number) {
 export default function BalanceCard({ balance, income, expense, userName }: BalanceCardProps) {
   const balanceRef = useRef<HTMLSpanElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(true);
+  const { hidden } = usePrivacy();
   const [displayValue, setDisplayValue] = useState(0);
 
   useEffect(() => {
@@ -71,17 +72,6 @@ export default function BalanceCard({ balance, income, expense, userName }: Bala
             Saldo atual
           </p>
         </div>
-        <button
-          onClick={() => setVisible((v) => !v)}
-          className="p-2 rounded-xl transition-colors"
-          style={{ background: "var(--input)" }}
-          aria-label={visible ? "Ocultar saldo" : "Mostrar saldo"}
-        >
-          <i
-            className={`fa-solid ${visible ? "fa-eye" : "fa-eye-slash"} text-sm`}
-            style={{ color: "var(--muted-foreground)" }}
-          />
-        </button>
       </div>
 
       {/* Saldo principal */}
@@ -89,7 +79,7 @@ export default function BalanceCard({ balance, income, expense, userName }: Bala
         <span
           ref={balanceRef}
           className="balance-text text-4xl font-normal tracking-tight"
-          style={{ filter: visible ? "none" : "blur(12px)", transition: "filter 0.3s" }}
+          style={{ filter: hidden ? "blur(12px)" : "none", transition: "filter 0.3s" }}
         >
           {formatBRL(displayValue)}
         </span>
@@ -107,7 +97,7 @@ export default function BalanceCard({ balance, income, expense, userName }: Bala
           </div>
           <span
             className="mono-data text-sm font-medium text-income"
-            style={{ filter: visible ? "none" : "blur(8px)", transition: "filter 0.3s" }}
+            style={{ filter: hidden ? "blur(8px)" : "none", transition: "filter 0.3s" }}
           >
             {formatBRL(income)}
           </span>
@@ -123,7 +113,7 @@ export default function BalanceCard({ balance, income, expense, userName }: Bala
           </div>
           <span
             className="mono-data text-sm font-medium text-expense"
-            style={{ filter: visible ? "none" : "blur(8px)", transition: "filter 0.3s" }}
+            style={{ filter: hidden ? "blur(8px)" : "none", transition: "filter 0.3s" }}
           >
             {formatBRL(expense)}
           </span>

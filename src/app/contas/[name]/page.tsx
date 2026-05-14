@@ -6,13 +6,14 @@ import ContaDetailClient from "./ContaDetailClient";
 export default async function ContaDetailPage({
   params,
 }: {
-  params: { name: string };
+  params: Promise<{ name: string }>;
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const accountName = decodeURIComponent(params.name);
+  const { name } = await params;
+  const accountName = decodeURIComponent(name);
 
   // Fetch all transactions for this account
   const { data: txRows } = await supabase

@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { BRL } from "@/lib/formatters";
+import TransferModal from "./TransferModal";
 
 interface AccountData {
   name: string;
@@ -14,6 +16,12 @@ interface AccountData {
   icon: string;
   txCount: number;
   lastDate: string | null;
+}
+
+interface CardAccount {
+  name: string;
+  color: string;
+  type: string;
 }
 
 function AccountCard({ account }: { account: AccountData }) {
@@ -78,8 +86,29 @@ function AccountCard({ account }: { account: AccountData }) {
   );
 }
 
-export default function ContasClient({ accounts }: { accounts: AccountData[] }) {
+export default function ContasClient({
+  accounts,
+  cardAccounts,
+  totalCommitted,
+  totalInvestments,
+  totalSavings,
+  creditCardDebt,
+}: {
+  accounts: AccountData[];
+  cardAccounts: CardAccount[];
+  totalCommitted: number;
+  totalInvestments: number;
+  totalSavings: number;
+  creditCardDebt: number;
+}) {
   const router = useRouter();
+  const [showTransfer, setShowTransfer] = useState(false);
+
+  const allAccounts = [
+    ...accounts.map(a => ({ name: a.name, color: a.color, type: a.type })),
+    ...cardAccounts,
+  ];
+  const canTransfer = accounts.length >= 1 && allAccounts.length >= 2;
 
   if (accounts.length === 0) {
     return (
@@ -104,11 +133,61 @@ export default function ContasClient({ accounts }: { accounts: AccountData[] }) 
     );
   }
 
-  // Total balance across all accounts
-  const totalBalance = accounts.reduce((s, a) => s + a.balance, 0);
+  const totalBalance     = accounts.reduce((s, a) => s + a.balance, 0);
+  const projectedBalance = totalBalance - totalCommitted;
+  const totalAssets      = totalBalance + totalInvestments + totalSavings;
+  const netWorth         = totalAssets - creditCardDebt;
 
   return (
     <div className="flex flex-col gap-5">
+      {/* Patrimônio Líquido */}
+      <div className="rounded-2xl px-4 py-4"
+        style={{ background: "linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(139,92,246,0.08) 100%)", border: "1px solid rgba(99,102,241,0.2)" }}>
+        <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--muted-foreground)" }}>
+          Patrimônio Líquido
+        </p>
+        <p className="mono-data text-2xl font-bold mb-3"
+          style={{ color: netWorth >= 0 ? "#6366F1" : "var(--expense)" }}>
+          {BRL(netWorth)}
+        </p>
+        <div className="flex flex-col gap-1.5" style={{ borderTop: "1px solid rgba(99,102,241,0.15)", paddingTop: "0.75rem" }}>
+          <div className="flex items-center justify-between">
+            <p className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+              <i className="fa-solid fa-building-columns mr-1.5 text-[10px]" style={{ color: "#8B5CF6" }} />
+              Contas
+            </p>
+            <p className="mono-data text-[11px] font-semibold" style={{ color: "var(--income)" }}>{BRL(totalBalance)}</p>
+          </div>
+          {totalInvestments > 0 && (
+            <div className="flex items-center justify-between">
+              <p className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+                <i className="fa-solid fa-chart-line mr-1.5 text-[10px]" style={{ color: "#6366F1" }} />
+                Investimentos
+              </p>
+              <p className="mono-data text-[11px] font-semibold" style={{ color: "var(--income)" }}>{BRL(totalInvestments)}</p>
+            </div>
+          )}
+          {totalSavings > 0 && (
+            <div className="flex items-center justify-between">
+              <p className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+                <i className="fa-solid fa-piggy-bank mr-1.5 text-[10px]" style={{ color: "#10B981" }} />
+                Reservas/Metas
+              </p>
+              <p className="mono-data text-[11px] font-semibold" style={{ color: "var(--income)" }}>{BRL(totalSavings)}</p>
+            </div>
+          )}
+          {creditCardDebt > 0 && (
+            <div className="flex items-center justify-between">
+              <p className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+                <i className="fa-solid fa-credit-card mr-1.5 text-[10px]" style={{ color: "var(--expense)" }} />
+                Dívida cartões
+              </p>
+              <p className="mono-data text-[11px] font-semibold" style={{ color: "var(--expense)" }}>-{BRL(creditCardDebt)}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Total summary */}
       <div className="rounded-2xl px-4 py-3"
         style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
@@ -119,7 +198,47 @@ export default function ContasClient({ accounts }: { accounts: AccountData[] }) 
           style={{ color: totalBalance >= 0 ? "var(--income)" : "var(--expense)" }}>
           {BRL(totalBalance)}
         </p>
+
+        {totalCommitted > 0 && (
+          <div className="mt-2 pt-2 flex flex-col gap-1"
+            style={{ borderTop: "1px solid var(--border)" }}>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+                <i className="fa-solid fa-credit-card mr-1.5 text-[10px]" style={{ color: "var(--expense)" }} />
+                Comprometido em faturas
+              </p>
+              <p className="mono-data text-[11px] font-semibold" style={{ color: "var(--expense)" }}>
+                -{BRL(totalCommitted)}
+              </p>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+                Disponível projetado
+              </p>
+              <p className="mono-data text-[11px] font-semibold"
+                style={{ color: projectedBalance >= 0 ? "var(--income)" : "var(--expense)" }}>
+                {BRL(projectedBalance)}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Transfer button */}
+      {canTransfer && (
+        <button
+          onClick={() => setShowTransfer(true)}
+          className="flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98]"
+          style={{
+            background: "rgba(99,102,241,0.1)",
+            color: "#6366F1",
+            border: "1px solid rgba(99,102,241,0.2)",
+          }}
+        >
+          <i className="fa-solid fa-right-left text-sm" />
+          Transferir entre contas
+        </button>
+      )}
 
       {/* Account cards */}
       <div className="flex flex-col gap-4">
@@ -131,6 +250,14 @@ export default function ContasClient({ accounts }: { accounts: AccountData[] }) 
       <p className="text-[10px] text-center pb-2" style={{ color: "var(--muted-foreground)" }}>
         Toque na conta para ver o extrato completo
       </p>
+
+      {showTransfer && (
+        <TransferModal
+          accounts={allAccounts}
+          onClose={() => setShowTransfer(false)}
+          onSaved={() => router.refresh()}
+        />
+      )}
     </div>
   );
 }

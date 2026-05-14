@@ -14,10 +14,15 @@ interface MonthSummary {
   label: string; month: number; year: number;
   income: number; expense: number;
 }
+interface FutureMonth {
+  label: string; month: number; year: number;
+  committed: number;
+}
 
 interface Props {
   categorySummary: CategorySummary[];
   monthlyData: MonthSummary[];
+  futureMonths: FutureMonth[];
   currentIncome: number;
   currentExpense: number;
   savingsRate: number;
@@ -40,12 +45,11 @@ function ChartTooltip({ active, payload, label }: any) {
 }
 
 export default function InsightsClient({
-  categorySummary, monthlyData, currentIncome, currentExpense, savingsRate,
+  categorySummary, monthlyData, futureMonths, currentIncome, currentExpense, savingsRate,
 }: Props) {
   const balance = currentIncome - currentExpense;
   const isPositive = balance >= 0;
 
-  // Insight tips based on data
   const tips: string[] = [];
   if (categorySummary.length > 0) {
     const top = categorySummary[0];
@@ -64,6 +68,10 @@ export default function InsightsClient({
     if (last.expense > prev.expense * 1.2) {
       tips.push(`Seus gastos aumentaram ${(((last.expense - prev.expense) / prev.expense) * 100).toFixed(0)}% em relação ao mês anterior.`);
     }
+  }
+  if (futureMonths.length > 0) {
+    const totalFuture = futureMonths.reduce((s, m) => s + m.committed, 0);
+    tips.push(`Você tem ${BRL(totalFuture)} comprometido em parcelas e compras futuras nos próximos ${futureMonths.length} meses.`);
   }
 
   return (
@@ -112,7 +120,7 @@ export default function InsightsClient({
         </div>
       )}
 
-      {/* Monthly bar chart */}
+      {/* Monthly bar chart — past 6 months */}
       {monthlyData.length > 1 && (
         <div className="rounded-2xl px-4 py-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <p className="text-sm font-semibold mb-3">Evolução mensal</p>
@@ -135,6 +143,40 @@ export default function InsightsClient({
               <div className="w-2.5 h-2.5 rounded-sm" style={{ background: "var(--expense)" }} />
               <span className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>Saídas</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Future cash flow — next 6 months committed */}
+      {futureMonths.length > 0 && (
+        <div className="rounded-2xl px-4 py-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+          <p className="text-sm font-semibold mb-0.5">Fluxo futuro</p>
+          <p className="text-[11px] mb-3" style={{ color: "var(--muted-foreground)" }}>
+            Parcelas e compras já lançadas nos próximos meses
+          </p>
+          <ResponsiveContainer width="100%" height={130}>
+            <BarChart data={futureMonths} margin={{ top: 0, right: 0, bottom: 0, left: 0 }} barCategoryGap="35%">
+              <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="rgba(128,128,128,0.1)" />
+              <XAxis dataKey="label" tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <YAxis hide />
+              <Tooltip content={<ChartTooltip />} />
+              <Bar dataKey="committed" name="Comprometido" fill="#F97316" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <div className="flex items-center gap-1.5 mt-2 justify-center">
+            <div className="w-2.5 h-2.5 rounded-sm" style={{ background: "#F97316" }} />
+            <span className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>Despesas comprometidas</span>
+          </div>
+
+          {/* Total committed summary */}
+          <div className="mt-3 pt-3 flex items-center justify-between"
+            style={{ borderTop: "1px solid var(--border)" }}>
+            <p className="text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+              Total nos próximos {futureMonths.length} meses
+            </p>
+            <p className="mono-data text-[11px] font-semibold" style={{ color: "#F97316" }}>
+              {BRL(futureMonths.reduce((s, m) => s + m.committed, 0))}
+            </p>
           </div>
         </div>
       )}
@@ -184,7 +226,6 @@ export default function InsightsClient({
             </div>
           </div>
 
-          {/* Category breakdown bars */}
           <div className="mt-4 flex flex-col gap-3">
             {categorySummary.map(c => (
               <div key={c.id} className="flex flex-col gap-1">

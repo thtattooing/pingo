@@ -9,21 +9,66 @@ export default async function ContasPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Fetch checking/savings transactions (all time for balance)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: txRaw } = await supabase
-    .from("transactions")
-    .select("account_name, account_type, amount, type, date, tx_type")
-    .eq("user_id", user.id)
-    .order("date", { ascending: false });
+  const today = new Date().toISOString().split("T")[0];
+
+  // Fetch checking/savings transactions + card_settings + future committed — all in parallel
+  const [
+    { data: txRaw },
+    { data: accountMeta },
+    { data: cardRows },
+    { data: futureRows },
+    { data: investRows },
+    { data: goalRows },
+    { data: ccRows },
+  ] = await Promise.all([
+    supabase
+      .from("transactions")
+      .select("account_name, account_type, amount, type, date, tx_type")
+      .eq("user_id", user.id)
+      .order("date", { ascending: false }),
+
+    supabase
+      .from("bank_accounts")
+      .select("name, type, initial_balance, color, icon")
+      .eq("user_id", user.id),
+
+    supabase
+      .from("card_settings")
+      .select("account_name, color")
+      .eq("user_id", user.id),
+
+    // Future credit card expenses = money already committed to upcoming invoices
+    supabase
+      .from("transactions")
+      .select("amount")
+      .eq("user_id", user.id)
+      .eq("account_type", "credit_card")
+      .eq("type", "expense")
+      .neq("tx_type", "transfer_internal")
+      .gt("date", today),
+
+    supabase.from("investments").select("amount").eq("user_id", user.id),
+    supabase.from("savings_goals").select("current_amount").eq("user_id", user.id),
+    supabase.from("transactions").select("amount,type,tx_type")
+      .eq("user_id", user.id)
+      .eq("account_type", "credit_card"),
+  ]);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const txRows = (txRaw as any[] | null)?.filter((t: any) => t.account_name) ?? [];
 
-  // Fetch bank account metadata (table may not exist if schema v5 not run)
-  const { data: accountMeta } = await supabase
-    .from("bank_accounts")
-    .select("name, type, initial_balance, color, icon")
-    .eq("user_id", user.id);
+  const totalCommitted   = (futureRows ?? []).reduce((s, t) => s + Number(t.amount), 0);
+  const totalInvestments = (investRows ?? []).reduce((s, i) => s + Number(i.amount), 0);
+  const totalSavings     = (goalRows   ?? []).reduce((s, g) => s + Number(g.current_amount), 0);
+  const ccExpenses = (ccRows ?? []).filter(t => t.type === "expense" && t.tx_type !== "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
+  const ccPayments = (ccRows ?? []).filter(t => t.type === "income"  && t.tx_type === "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
+  const creditCardDebt = Math.max(0, ccExpenses - ccPayments);
+
+  const cardAccounts = (cardRows ?? []).map(r => ({
+    name:  r.account_name,
+    color: r.color ?? "#F472B6",
+    type:  "credit_card" as const,
+  }));
 
   type AccountData = {
     name: string;
@@ -42,7 +87,7 @@ export default async function ContasPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   txRows.forEach((t: any) => {
     if (!t.account_name) return;
-    // Skip credit cards — those are shown in /cartoes
+    // Credit cards live in /cartoes — skip here
     if (t.account_type === "credit_card") return;
 
     if (!accountMap.has(t.account_name)) {
@@ -61,7 +106,7 @@ export default async function ContasPage() {
     }
 
     const a = accountMap.get(t.account_name)!;
-    // Exclude transfer_internal from balance (prevents double counting)
+    // Exclude transfer_internal from balance to prevent double-counting
     if (t.tx_type !== "transfer_internal") {
       if (t.type === "income") a.totalIncome  += Number(t.amount);
       else                     a.totalExpense += Number(t.amount);
@@ -96,7 +141,14 @@ export default async function ContasPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto px-5 pb-4">
-        <ContasClient accounts={accounts} />
+        <ContasClient
+          accounts={accounts}
+          cardAccounts={cardAccounts}
+          totalCommitted={totalCommitted}
+          totalInvestments={totalInvestments}
+          totalSavings={totalSavings}
+          creditCardDebt={creditCardDebt}
+        />
       </div>
 
       <BottomNav />
