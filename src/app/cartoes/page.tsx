@@ -117,9 +117,18 @@ export default async function CartoesPage({
     if (!cardMap.has(s.account_name)) addCard(s.account_name, s.account_type ?? "credit_card");
   });
 
+  const _sortToday = new Date();
+  const _getDaysLeft = (dueDay: number) => {
+    if (dueDay <= 0) return 9999;
+    const d = new Date(_sortToday.getFullYear(), _sortToday.getMonth(), dueDay);
+    if (d < _sortToday) d.setMonth(d.getMonth() + 1);
+    return Math.ceil((d.getTime() - _sortToday.getTime()) / 86400000);
+  };
+
   const cards = Array.from(cardMap.values()).sort((a, b) => {
     if (a.type === "credit_card" && b.type !== "credit_card") return -1;
     if (a.type !== "credit_card" && b.type === "credit_card") return 1;
+    if (a.type === "credit_card") return _getDaysLeft(a.dueDay) - _getDaysLeft(b.dueDay);
     return b.currentFatura - a.currentFatura;
   });
 

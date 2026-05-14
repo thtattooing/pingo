@@ -105,10 +105,15 @@ function VisualCard({ card, month, year }: { card: CardData; month: number; year
             </div>
             <div className="text-right">
               {daysLeft !== null ? (
-                <div>
-                  <p className="text-white/60 text-[10px] mb-0.5">
-                    {daysLeft <= 0 ? "Vence hoje" : `Vence em ${daysLeft}d`}
-                  </p>
+                <div className="text-right">
+                  <div className="flex items-center justify-end gap-1 mb-0.5">
+                    {daysLeft <= 5 && netFatura > 0 && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+                    )}
+                    <p className={`text-[10px] ${daysLeft <= 5 && netFatura > 0 ? "text-red-300 font-semibold" : "text-white/60"}`}>
+                      {daysLeft <= 0 ? "Vence hoje!" : daysLeft === 1 ? "Vence amanhã!" : `Vence em ${daysLeft}d`}
+                    </p>
+                  </div>
                   <p className="text-white text-sm font-semibold mono-data">dia {card.dueDay}</p>
                 </div>
               ) : card.nextFatura > 0 ? (

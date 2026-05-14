@@ -66,7 +66,7 @@ export default async function HomePage({
   const date30 = today30.toISOString().split("T")[0];
   const todayStr = new Date().toISOString().split("T")[0];
 
-  const [{ data: goalRows }, { data: bankMeta }, { data: checkingTxRows }, { data: next30Rows }] = await Promise.all([
+  const [{ data: goalRows }, { data: bankMeta }, { data: checkingTxRows }, { data: next30Rows }, { data: cardSettingsRows }] = await Promise.all([
     supabase
       .from("goals")
       .select("category_id,limit_amount")
@@ -93,6 +93,11 @@ export default async function HomePage({
       .neq("tx_type", "transfer_internal")
       .gt("date", todayStr)
       .lte("date", date30),
+
+    supabase
+      .from("card_settings")
+      .select("account_name,due_day")
+      .eq("user_id", user.id),
   ]);
 
   const txList   = txRows ?? [];
@@ -140,6 +145,25 @@ export default async function HomePage({
   const ccMonthPayments = txList.filter(t => t.account_type === "credit_card" && t.type === "income"  && t.tx_type === "transfer_internal").reduce((s, t) => s + Number(t.amount), 0);
   const ccNetFatura     = Math.max(0, ccMonthExpense - ccMonthPayments);
   const next30dCC       = (next30Rows ?? []).reduce((s, t) => s + Number(t.amount), 0);
+
+  // Próxima fatura urgente — só exibe no mês atual
+  const isCurrentMonth = (() => { const n = new Date(); return n.getFullYear() === year && n.getMonth() + 1 === month; })();
+  const urgentCC = isCurrentMonth ? (() => {
+    const now = new Date();
+    return (cardSettingsRows ?? [])
+      .map(s => {
+        if (!s.due_day) return null;
+        const d = new Date(now.getFullYear(), now.getMonth(), s.due_day);
+        if (d <= now) d.setMonth(d.getMonth() + 1);
+        const daysLeft = Math.ceil((d.getTime() - now.getTime()) / 86400000);
+        const exp = txList.filter(t => t.account_name === s.account_name && t.account_type === "credit_card" && t.type === "expense" && t.tx_type !== "transfer_internal").reduce((sum, t) => sum + Number(t.amount), 0);
+        const pay = txList.filter(t => t.account_name === s.account_name && t.type === "income" && t.tx_type === "transfer_internal").reduce((sum, t) => sum + Number(t.amount), 0);
+        const netFatura = Math.max(0, exp - pay);
+        return { name: s.account_name, daysLeft, dueDay: s.due_day, netFatura };
+      })
+      .filter((c): c is NonNullable<typeof c> => c !== null && c.netFatura > 0)
+      .sort((a, b) => a.daysLeft - b.daysLeft)[0] ?? null;
+  })() : null;
 
   // Subscriptions (Etapa 4)
   const recurringTx = txList.filter(t => t.type === "expense" && t.is_recurring);
@@ -236,6 +260,40 @@ export default async function HomePage({
             next30dCC={next30dCC}
           />
         </div>
+
+        {/* Fatura urgente */}
+        {urgentCC && (
+          <Link href={`/cartoes?m=${year}-${String(month).padStart(2,"0")}`}
+            className="no-underline"
+          >
+            <div className="flex items-center gap-3 rounded-2xl px-4 py-3.5 animate-fade-in-up"
+              style={{
+                background: urgentCC.daysLeft <= 3
+                  ? "rgba(239,68,68,0.10)"
+                  : "rgba(251,191,36,0.08)",
+                border: urgentCC.daysLeft <= 3
+                  ? "1px solid rgba(239,68,68,0.25)"
+                  : "1px solid rgba(251,191,36,0.25)",
+              }}>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: urgentCC.daysLeft <= 3 ? "rgba(239,68,68,0.15)" : "rgba(251,191,36,0.12)" }}>
+                <i className="fa-solid fa-credit-card text-sm"
+                  style={{ color: urgentCC.daysLeft <= 3 ? "#ef4444" : "var(--gold)" }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold truncate"
+                  style={{ color: urgentCC.daysLeft <= 3 ? "#ef4444" : "var(--gold)" }}>
+                  {urgentCC.daysLeft <= 0 ? "Fatura vence hoje!" : urgentCC.daysLeft === 1 ? "Fatura vence amanhã!" : `Fatura vence em ${urgentCC.daysLeft} dias`}
+                </p>
+                <p className="text-[10px] mt-0.5 truncate" style={{ color: "var(--muted-foreground)" }}>
+                  {urgentCC.name} · dia {urgentCC.dueDay} · {BRL(urgentCC.netFatura)}
+                </p>
+              </div>
+              <i className="fa-solid fa-chevron-right text-xs opacity-40"
+                style={{ color: urgentCC.daysLeft <= 3 ? "#ef4444" : "var(--gold)" }} />
+            </div>
+          </Link>
+        )}
 
         {/* Assinaturas */}
         {subscriptions.length > 0 && (
