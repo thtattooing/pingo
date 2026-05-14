@@ -21,11 +21,18 @@ interface CardData {
   color: string;
 }
 
+interface FutureMonth {
+  monthKey: string;
+  total: number;
+  byCard: { name: string; amount: number; color: string }[];
+}
+
 interface Props {
   cards: CardData[];
   month: number;
   year: number;
   openSettings: string | null;
+  futureMonths: FutureMonth[];
 }
 
 const BRAND_LABEL: Record<string, string> = {
@@ -190,7 +197,7 @@ function VisualCard({ card, month, year }: { card: CardData; month: number; year
   );
 }
 
-export default function CartoesClient({ cards, month, year, openSettings }: Props) {
+export default function CartoesClient({ cards, month, year, openSettings, futureMonths }: Props) {
   const router = useRouter();
   const [settingsCard, setSettingsCard] = useState<string | null>(openSettings);
   const [showCreate,   setShowCreate]   = useState(false);
@@ -270,6 +277,72 @@ export default function CartoesClient({ cards, month, year, openSettings }: Prop
                   {BRL(totalNext)}
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* Calendário de compromissos futuros */}
+          {futureMonths.length > 0 && (
+            <div className="mx-5">
+              <p className="text-[11px] font-semibold uppercase tracking-widest mb-3"
+                style={{ color: "var(--muted-foreground)" }}>
+                Compromisso futuro
+              </p>
+              <div className="flex gap-2.5 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+                {(() => {
+                  const peak = Math.max(...futureMonths.map(f => f.total));
+                  return futureMonths.map(fm => {
+                    const [yr, mo] = fm.monthKey.split("-");
+                    const label = new Date(Number(yr), Number(mo) - 1, 1)
+                      .toLocaleDateString("pt-BR", { month: "short" })
+                      .replace(".", "");
+                    const isPeak = fm.total === peak && peak > 0;
+                    const barPct = peak > 0 ? Math.round((fm.total / peak) * 100) : 0;
+                    return (
+                      <div key={fm.monthKey}
+                        className="flex-shrink-0 rounded-2xl px-3.5 pt-3 pb-3 flex flex-col gap-2"
+                        style={{
+                          minWidth: 100,
+                          background: isPeak ? "rgba(239,68,68,0.07)" : "var(--card)",
+                          border: isPeak ? "1px solid rgba(239,68,68,0.2)" : "1px solid var(--border)",
+                        }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wide"
+                            style={{ color: isPeak ? "#ef4444" : "var(--muted-foreground)" }}>
+                            {label} {yr}
+                          </p>
+                          {isPeak && <i className="fa-solid fa-arrow-trend-up text-[9px] text-red-400" />}
+                        </div>
+                        <p className="mono-data text-sm font-bold leading-none"
+                          style={{ color: isPeak ? "#ef4444" : "var(--foreground)" }}>
+                          {BRL(fm.total)}
+                        </p>
+                        {/* Barra proporcional */}
+                        <div className="h-1 rounded-full overflow-hidden"
+                          style={{ background: "var(--border)" }}>
+                          <div className="h-full rounded-full"
+                            style={{
+                              width: `${barPct}%`,
+                              background: isPeak ? "#ef4444" : "var(--primary)",
+                            }} />
+                        </div>
+                        {/* Pontos por cartão */}
+                        <div className="flex gap-1 flex-wrap">
+                          {fm.byCard.map(bc => (
+                            <span key={bc.name}
+                              className="w-2 h-2 rounded-full flex-shrink-0"
+                              style={{ background: bc.color }}
+                              title={`${bc.name}: ${BRL(bc.amount)}`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              <p className="text-[9px] mt-1.5" style={{ color: "var(--muted-foreground)" }}>
+                Cada ponto = um cartão · apenas despesas CC futuras importadas
+              </p>
             </div>
           )}
 

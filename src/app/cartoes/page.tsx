@@ -30,7 +30,12 @@ export default async function CartoesPage({
     ? `${nextYear + 1}-01-01`
     : `${nextYear}-${String(nextMonth + 1).padStart(2, "0")}-01`;
 
-  const [{ data: curTx }, { data: nextTx }, { data: settingsRows }, { data: allAccounts }] = await Promise.all([
+  const todayStr = new Date().toISOString().split("T")[0];
+  const future12 = new Date();
+  future12.setMonth(future12.getMonth() + 12);
+  const future12Str = future12.toISOString().split("T")[0];
+
+  const [{ data: curTx }, { data: nextTx }, { data: settingsRows }, { data: allAccounts }, { data: futureTxRows }] = await Promise.all([
     supabase.from("transactions")
       .select("account_name,account_type,amount,type,tx_type")
       .eq("user_id", user.id)
@@ -48,6 +53,14 @@ export default async function CartoesPage({
       .eq("user_id", user.id)
       .not("account_name", "is", null)
       .limit(1000),
+    supabase.from("transactions")
+      .select("account_name,amount,date")
+      .eq("user_id", user.id)
+      .eq("account_type", "credit_card")
+      .eq("type", "expense")
+      .neq("tx_type", "transfer_internal")
+      .gt("date", todayStr)
+      .lte("date", future12Str),
   ]);
 
   type CardData = {
@@ -132,6 +145,28 @@ export default async function CartoesPage({
     return b.currentFatura - a.currentFatura;
   });
 
+  // Calendário de compromissos futuros agrupado por mês
+  const futureMap = new Map<string, { total: number; byCard: Map<string, number> }>();
+  (futureTxRows ?? []).forEach(t => {
+    const mk = (t.date as string).substring(0, 7);
+    if (!futureMap.has(mk)) futureMap.set(mk, { total: 0, byCard: new Map() });
+    const entry = futureMap.get(mk)!;
+    entry.total += Number(t.amount);
+    const cardName = t.account_name ?? "outros";
+    entry.byCard.set(cardName, (entry.byCard.get(cardName) ?? 0) + Number(t.amount));
+  });
+  const futureMonths = Array.from(futureMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([monthKey, { total, byCard }]) => ({
+      monthKey,
+      total,
+      byCard: Array.from(byCard.entries()).map(([name, amount]) => ({
+        name,
+        amount,
+        color: settingsRows?.find(s => s.account_name === name)?.color ?? "#F472B6",
+      })),
+    }));
+
   const openSettings = sp?.settings
     ? decodeURIComponent(sp.settings)
     : null;
@@ -156,6 +191,7 @@ export default async function CartoesPage({
           month={month}
           year={year}
           openSettings={openSettings}
+          futureMonths={futureMonths}
         />
       </div>
 
