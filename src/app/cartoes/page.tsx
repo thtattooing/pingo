@@ -46,7 +46,7 @@ export default async function CartoesPage({
       .gte("date", nextStart).lt("date", nextEnd)
       .eq("type" as never, "expense"),
     supabase.from("card_settings")
-      .select("account_name,credit_limit,due_day,closing_day,color,brand,account_type")
+      .select("account_name,credit_limit,due_day,closing_day,color,brand,account_type,interest_rate")
       .eq("user_id", user.id),
     supabase.from("transactions")
       .select("account_name,account_type")
@@ -75,6 +75,7 @@ export default async function CartoesPage({
     dueDay: number;
     closingDay: number;
     color: string;
+    interestRate: number;
   };
 
   const cardMap = new Map<string, CardData>();
@@ -86,15 +87,16 @@ export default async function CartoesPage({
       cardMap.set(name, {
         name,
         type:            resolvedType,
-        brand:           s?.brand         ?? "visa",
+        brand:           s?.brand          ?? "visa",
         currentFatura:   0,
         currentCreditos: 0,
         currentPayments: 0,
         nextFatura:      0,
-        creditLimit:     s?.credit_limit  ?? 0,
-        dueDay:          s?.due_day       ?? 0,
-        closingDay:      s?.closing_day   ?? 20,
-        color:           s?.color         ?? (resolvedType === "credit_card" ? "#F472B6" : "#8B5CF6"),
+        creditLimit:     s?.credit_limit   ?? 0,
+        dueDay:          s?.due_day        ?? 0,
+        closingDay:      s?.closing_day    ?? 20,
+        color:           s?.color          ?? (resolvedType === "credit_card" ? "#F472B6" : "#8B5CF6"),
+        interestRate:    Number(s?.interest_rate ?? 0),
       });
     }
   };

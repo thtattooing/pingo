@@ -12,6 +12,7 @@ interface CardSetting {
   color: string;
   brand?: string;
   account_type?: string;
+  interest_rate?: number;
 }
 
 const CARD_COLORS = ["#F472B6","#A78BFA","#60A5FA","#34D399","#FBBF24","#F97316","#EC4899","#06B6D4"];
@@ -34,9 +35,10 @@ export default function CardSettingsSheet({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [limit,      setLimit]      = useState(String(existing?.credit_limit ?? ""));
-  const [dueDay,     setDueDay]     = useState(String(existing?.due_day      ?? ""));
-  const [closingDay, setClosingDay] = useState(String(existing?.closing_day  ?? "20"));
+  const [limit,      setLimit]      = useState(String(existing?.credit_limit  ?? ""));
+  const [dueDay,     setDueDay]     = useState(String(existing?.due_day       ?? ""));
+  const [closingDay, setClosingDay] = useState(String(existing?.closing_day   ?? "20"));
+  const [rate,       setRate]       = useState(String(existing?.interest_rate ?? ""));
   const [color,      setColor]      = useState(existing?.color ?? "#F472B6");
   const [brand,      setBrand]      = useState(existing?.brand ?? "visa");
   const [saving,     setSaving]     = useState(false);
@@ -48,10 +50,12 @@ export default function CardSettingsSheet({
     if (!user) { setSaving(false); return; }
 
     const resolvedType = accountType ?? existing?.account_type ?? "credit_card";
+    const parsedRate = parseFloat(rate.replace(",", "."));
     const payload = {
-      credit_limit: parseFloat(limit.replace(",", ".")) || 0,
-      due_day:      parseInt(dueDay)     || 0,
-      closing_day:  parseInt(closingDay) || 20,
+      credit_limit:  parseFloat(limit.replace(",", ".")) || 0,
+      due_day:       parseInt(dueDay)     || 0,
+      closing_day:   parseInt(closingDay) || 20,
+      interest_rate: isNaN(parsedRate) ? null : parsedRate,
       color,
       brand,
     };
@@ -117,6 +121,28 @@ export default function CardSettingsSheet({
               className="w-full px-4 py-3 rounded-xl text-sm outline-none mono-data"
               style={{ background: "var(--input)", color: "var(--foreground)" }}
               placeholder="Ex: 5000" inputMode="decimal" />
+          </div>
+
+          {/* Interest rate */}
+          <div>
+            <p className="text-xs mb-1.5" style={{ color: "var(--muted-foreground)" }}>
+              Taxa de juros rotativo
+              <span className="ml-1 opacity-60">(% ao mês — opcional, para estratégia de dívida)</span>
+            </p>
+            <div className="relative">
+              <input value={rate} onChange={e => setRate(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl text-sm outline-none mono-data pr-12"
+                style={{ background: "var(--input)", color: "var(--foreground)" }}
+                placeholder="Ex: 4.5" inputMode="decimal" />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold"
+                style={{ color: "var(--muted-foreground)" }}>%/mês</span>
+            </div>
+            {rate && !isNaN(parseFloat(rate.replace(",", "."))) && (
+              <p className="text-[10px] mt-1" style={{ color: "var(--muted-foreground)" }}>
+                {(parseFloat(rate.replace(",", ".")) * 12).toFixed(1)}% ao ano
+                · Nubank ~{" "}13%/mês · Médio BR ~{" "}14%/mês
+              </p>
+            )}
           </div>
 
           {/* Due day */}

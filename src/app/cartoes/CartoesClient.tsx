@@ -19,6 +19,7 @@ interface CardData {
   dueDay: number;
   closingDay: number;
   color: string;
+  interestRate: number;
 }
 
 interface FutureMonth {
@@ -173,12 +174,13 @@ function VisualCard({ card, month, year }: { card: CardData; month: number; year
           accountName={card.name}
           accountType={card.type}
           existing={{
-            account_name: card.name,
-            credit_limit: card.creditLimit,
-            due_day:      card.dueDay,
-            closing_day:  card.closingDay,
-            color:        card.color,
-            account_type: card.type,
+            account_name:  card.name,
+            credit_limit:  card.creditLimit,
+            due_day:       card.dueDay,
+            closing_day:   card.closingDay,
+            color:         card.color,
+            account_type:  card.type,
+            interest_rate: card.interestRate || undefined,
           }}
           onClose={() => setShowSettings(false)}
           onSaved={() => router.refresh()}
@@ -345,6 +347,84 @@ export default function CartoesClient({ cards, month, year, openSettings, future
               </p>
             </div>
           )}
+
+          {/* Estratégia de pagamento — só exibe quando algum cartão tem taxa configurada */}
+          {(() => {
+            const withRate = creditCards
+              .filter(c => c.interestRate > 0 && Math.max(0, c.currentFatura - c.currentPayments) > 0)
+              .sort((a, b) => b.interestRate - a.interestRate);
+            if (withRate.length === 0) return null;
+
+            const totalDebt = withRate.reduce((s, c) => s + Math.max(0, c.currentFatura - c.currentPayments), 0);
+
+            return (
+              <div className="mx-5">
+                <p className="text-[11px] font-semibold uppercase tracking-widest mb-1"
+                  style={{ color: "var(--muted-foreground)" }}>
+                  Estratégia de pagamento
+                </p>
+                <p className="text-[10px] mb-3" style={{ color: "var(--muted-foreground)" }}>
+                  Método avalanche · pague primeiro o maior juros
+                </p>
+                <div className="rounded-2xl overflow-hidden flex flex-col"
+                  style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                  {withRate.map((card, i) => {
+                    const debt     = Math.max(0, card.currentFatura - card.currentPayments);
+                    const monthly  = card.interestRate / 100;
+                    const isFirst  = i === 0;
+                    const interest = debt * monthly;
+                    return (
+                      <div key={card.name}
+                        className="flex items-center gap-3 px-4 py-3"
+                        style={{ borderBottom: i < withRate.length - 1 ? "1px solid var(--border)" : "none" }}>
+                        {/* Rank */}
+                        <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold"
+                          style={{
+                            background: isFirst ? "rgba(239,68,68,0.12)" : "var(--input)",
+                            color:      isFirst ? "#ef4444" : "var(--muted-foreground)",
+                          }}>
+                          {i + 1}º
+                        </div>
+                        {/* Cor do cartão */}
+                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{ background: card.color }} />
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{card.name}</p>
+                          <p className="text-[10px] mono-data" style={{ color: "var(--muted-foreground)" }}>
+                            {card.interestRate.toFixed(1)}%/mês
+                            · juros ~{BRL(interest)}/mês se não pagar
+                          </p>
+                        </div>
+                        {/* Dívida */}
+                        <div className="text-right flex-shrink-0">
+                          <p className="mono-data text-sm font-semibold" style={{ color: "var(--expense)" }}>
+                            {BRL(debt)}
+                          </p>
+                          <p className="text-[9px]" style={{ color: "var(--muted-foreground)" }}>
+                            {totalDebt > 0 ? Math.round((debt / totalDebt) * 100) : 0}% do total
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {/* Rodapé total */}
+                  <div className="flex items-center justify-between px-4 py-2.5"
+                    style={{ background: "rgba(239,68,68,0.05)", borderTop: "1px solid var(--border)" }}>
+                    <p className="text-xs font-semibold" style={{ color: "var(--muted-foreground)" }}>
+                      Total dívida CC
+                    </p>
+                    <p className="mono-data text-sm font-bold" style={{ color: "var(--expense)" }}>
+                      {BRL(totalDebt)}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-[9px] mt-1.5" style={{ color: "var(--muted-foreground)" }}>
+                  Configure a taxa no ⚙ de cada cartão · baseado na fatura atual
+                </p>
+              </div>
+            );
+          })()}
 
           {/* Cartões de crédito */}
           {creditCards.length > 0 && (
