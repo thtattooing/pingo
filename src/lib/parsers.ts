@@ -14,18 +14,34 @@ export interface ParsedRow {
   installmentTotal?:    number;   // total installments detected (e.g. 12)
   installmentCurrent?:  number;   // current installment (e.g. 2)
   installmentGroupKey?: string;   // cleaned description for grouping same-purchase rows
+  bankCategory?:        string;   // raw category string from bank CSV (C6, Itaú, etc.)
 }
 
 /** Classify transaction type from description + income/expense */
 export function detectTxType(description: string, type: "income" | "expense"): TxType {
   const d = description.toLowerCase();
 
-  // Transfer between own accounts — highest priority, prevents double counting
+  // ── Liquidações de passivo (pagamento de fatura de cartão) ──
+  // São movimentações patrimoniais — saem da conta corrente mas já foram contadas
+  // como despesa quando a compra foi feita no cartão. tx_type=transfer_internal
+  // garante que sejam ignoradas em todos os cálculos de despesa.
   if (
     /transfer[eê]ncia\s+entre\s+(contas?|conta)\s*(pr[oó]pria|pr[oó]prio)?/i.test(d) ||
     /\bpix\b.{0,30}\bvoc[eê]\b.{0,10}\bmesmo\b/i.test(d) ||
     /\bpago\s+por\s+voc[eê]\s+mesmo\b/i.test(d) ||
-    /\benvio\s+para\s+voc[eê]\b/i.test(d)
+    /\benvio\s+para\s+voc[eê]\b/i.test(d) ||
+    /pagamento\s+(?:de\s+)?(?:fatura|cart[aã]o)/i.test(d) ||
+    /pgto\s+(?:fat|cart[aã]o)/i.test(d) ||
+    /pagto\s+fat/i.test(d) ||
+    /^pagamento\s+fatura\s+/i.test(d) ||
+    /^pagamento\s+recebido$/i.test(d) ||
+    /inclus[aã]o\s+de\s+pagamento/i.test(d) ||
+    /^fatura\s+de\s+cart[aã]o$/i.test(d) ||
+    /fat\s+(?:nubank|c6|inter|bradesco|ita[uú]|santander|xp|btg|sicredi|safra|original)/i.test(d) ||
+    /d[eé]bito\s+autom[aá]tico\s+(?:cartao|cart[aã]o)/i.test(d) ||
+    /nubank\s+s\.?\s*a\.?/i.test(d) ||
+    /nu\s+pagamentos\s+s/i.test(d) ||
+    /pix\s+(?:enviado|transf|agendado).{0,50}(?:nubank|nu\s*pag|c6\s+bank|banco\s+inter)/i.test(d)
   ) return "transfer_internal";
 
   // PIX
@@ -39,11 +55,9 @@ export function detectTxType(description: string, type: "income" | "expense"): T
     return type === "income" ? "transfer_in" : "transfer_out";
   }
 
-  // Boleto / bill / card payment
+  // Boleto genérico (não cartão)
   if (
     /\b(boleto|bolet\.)\b/i.test(d) ||
-    /pagamento\s+(?:de\s+)?(?:fatura|cart[aã]o|conta)/i.test(d) ||
-    /pgto\s+(?:fat|cart)/i.test(d) ||
     /d[eé]bito\s+autom[aá]tico/i.test(d)
   ) return "boleto";
 
@@ -235,6 +249,9 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
   // Parcela column (C6 fatura) — installment info in a dedicated column (e.g. "6/12", "Única")
   const parcelaColI = fi("parcela", "parc.");
 
+  // Bank category column — C6, Itaú, Bradesco export merchant category
+  const bankCatColI = fi("categoria", "category", "categor");
+
   // Nubank v2: "type" column with values "transaction" / "payment"
   const nuTypeI = fi("type");
   const dataRows = lines.slice(headerLine + 1, Math.min(headerLine + 8, lines.length)).map(l => csvSplit(l, sep));
@@ -385,7 +402,7 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
       amount = Math.abs(signed);
     }
 
-    const excludeCols = new Set([dateI, amtI, creditI, debitI, nuTypeI, parcelaColI, dcColI].filter(i => i >= 0));
+    const excludeCols = new Set([dateI, amtI, creditI, debitI, nuTypeI, parcelaColI, dcColI, bankCatColI].filter(i => i >= 0));
     const rawDesc = (
       descI >= 0
         ? c[descI]
@@ -399,6 +416,8 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
     const raw = (hasParcela ? `${rawDesc} ${parcelaRaw}` : rawDesc) || "Transação";
     const { clean, total, current } = extractInstallment(raw);
 
+    const bankCategory = bankCatColI >= 0 ? (c[bankCatColI] ?? "").trim() || undefined : undefined;
+
     return [{
       date:                 parseDate(c[dateI] ?? ""),
       description:          clean,
@@ -408,6 +427,7 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
       installmentTotal:     total   ?? undefined,
       installmentCurrent:   current ?? undefined,
       installmentGroupKey:  total && current ? clean : undefined,
+      bankCategory,
     }];
   });
 

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useMemo } from "react";
 import { parseFile, detectBank, detectTxType, ParsedRow, ParseDebug } from "@/lib/parsers";
-import { CATEGORIES, detectCategory } from "@/lib/categories";
+import { CATEGORIES, detectCategory, mapBankCategory } from "@/lib/categories";
 import { createClient } from "@/lib/supabase/client";
 import { loadCategoryRules, descriptionKey } from "@/lib/category-memory";
 
@@ -110,17 +110,15 @@ function AccountPicker({
   const pool     = isCredit ? existingCards : existingAccounts;
   const hasPool  = pool.length > 0;
 
-  // For credit cards: never allow free text when there are registered cards
-  // (prevents name mismatches that create ghost accounts)
-  // For checking accounts: allow free text even with pool (less critical)
-  const showInput = isCredit
-    ? (!hasPool || custom) && false  // credit: only pool, no free text
-    : (custom || !hasPool);
+  // Credit cards: allow free text only when no cards are registered yet
+  // (when pool exists, force selection from registered cards to avoid name mismatches)
+  const showInput = isCredit ? !hasPool : (custom || !hasPool);
 
-  // For credit cards with no registered card: show a hint to create one first
   const creditNoPool = isCredit && !hasPool;
 
-  const fallbackSuggestions = ["Nubank Conta", "Inter Conta", "C6 Conta", "Bradesco Conta Corrente"];
+  const fallbackSuggestions = isCredit
+    ? ["Nubank", "Inter", "C6 Bank", "Bradesco", "Itaú", "Santander"]
+    : ["Nubank Conta", "Inter Conta", "C6 Conta", "Bradesco Conta Corrente"];
 
   return (
     <div className="flex flex-col gap-2">
@@ -128,15 +126,15 @@ function AccountPicker({
         {isCredit ? "Selecionar cartão" : "Selecionar conta"}
       </p>
 
-      {/* Credit card with no registered cards → guide to create first */}
+      {/* Credit card with no registered cards → allow naming inline */}
       {creditNoPool && (
         <div className="flex items-start gap-3 px-4 py-3 rounded-2xl"
           style={{ background: "rgba(244,114,182,0.08)", border: "1px solid rgba(244,114,182,0.25)" }}>
           <i className="fa-solid fa-circle-info text-sm flex-shrink-0 mt-0.5" style={{ color: "var(--primary)" }} />
           <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-            Nenhum cartão cadastrado. Vá em{" "}
-            <span className="font-semibold" style={{ color: "var(--foreground)" }}>Cartões → + Criar novo cartão</span>{" "}
-            e depois volte para importar a fatura.
+            Digite um nome para este cartão. Depois de importar, vá em{" "}
+            <span className="font-semibold" style={{ color: "var(--foreground)" }}>Cartões</span>{" "}
+            para cadastrá-lo com cor e limite.
           </p>
         </div>
       )}
@@ -189,7 +187,7 @@ function AccountPicker({
           <input
             value={name}
             onChange={e => onChange(e.target.value)}
-            placeholder="Ex: Inter Conta Digital…"
+            placeholder={isCredit ? "Ex: Nubank, C6 Bank…" : "Ex: Inter Conta Digital…"}
             className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
             style={{
               background: "var(--input)",
@@ -288,6 +286,8 @@ export default function ImportarClient({ userId, recentHashes, manualDateAmounts
     const supabase = createClient();
     const rules = await loadCategoryRules(supabase, userId);
 
+    const isCreditCard = (preselectedCard?.type ?? account.type) === "credit_card";
+
     const mapped: ImportRow[] = rawRows.map((r, i) => {
       const excluded      = looksLikeExclude(r.description);
       const hash          = dedup(r);
@@ -295,10 +295,27 @@ export default function ImportarClient({ userId, recentHashes, manualDateAmounts
       const dateAmtKey    = `${r.date}-${Number(r.amount).toFixed(2)}`;
       const isPossibleDupe = !excluded && !isDupe && manualDateAmtSet.has(dateAmtKey);
       const learned       = rules.get(descriptionKey(r.description));
+
+      // Critical fix: credit card faturas use positive = expense convention.
+      // The parser's "mixed mode" may incorrectly classify purchases as income.
+      // Force all non-excluded CC rows to expense, except explicit refunds/cashbacks.
+      let rowType = r.type;
+      if (isCreditCard && !excluded) {
+        const isRefund = /reembolso|estorno|cashback|devolu|credito\s*na\s*fatura/i.test(r.description);
+        rowType = isRefund ? "income" : "expense";
+      }
+
+      // Category: learned rule > bank's own category > keyword detection
+      const bankCatId = r.bankCategory ? mapBankCategory(r.bankCategory) : null;
+      const categoryId = learned
+        ?? (bankCatId && bankCatId !== "outros" ? bankCatId : null)
+        ?? detectCategory(r.description);
+
       return {
         ...r,
+        type:           rowType,
         uid:            `${i}-${r.date}-${r.amount}`,
-        categoryId:     learned ?? detectCategory(r.description),
+        categoryId,
         subcategory:    "",
         selected:       !excluded && !isDupe,
         isDupe,
@@ -718,14 +735,14 @@ export default function ImportarClient({ userId, recentHashes, manualDateAmounts
 
         {/* Bloquear se cartão de crédito sem cartão cadastrado e sem preselectedCard */}
         {(() => {
-          const needsCard = account.type === "credit_card" && !preselectedCard && existingCards.length === 0;
+          const noName = !account.name.trim() && !preselectedCard;
           return (
             <button
               onClick={runPreview}
-              disabled={needsCard}
+              disabled={noName}
               className="w-full py-4 rounded-2xl font-semibold text-sm btn-primary disabled:opacity-40">
               <i className="fa-solid fa-eye mr-2" />
-              {needsCard ? "Crie um cartão primeiro" : "Ver transações"}
+              {noName ? "Escolha ou nomeie a conta" : "Ver transações"}
             </button>
           );
         })()}

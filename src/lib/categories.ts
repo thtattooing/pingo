@@ -18,8 +18,8 @@ export const CATEGORIES: Category[] = [
       "lanchonete","lanche","pastelaria","pastel","hamburger","hamburguer","hot dog",
       "sushi","japonese","culinaria japonesa","churrasco","churrascaria","rodizio",
       "frango assado","kentucky","kfc","popeyes","outback","applebee","banana leaves",
-      // Supermarkets / markets
-      "mercado","supermercado","hipermercado","atacado","atacarejo","hortifruti",
+      // Supermarkets / markets (use "mercado " with space to avoid matching "mercadolivre")
+      "mercado ","supermercado","hipermercado","atacado","atacarejo","hortifruti",
       "sacolao","sacolão","feira","acougue","açougue","frigorífico",
       "carrefour","extra ","pao de acucar","pão de açúcar","assai","assaí",
       "prezunic","guanabara","mundial","bistek","fort atacado","atacadao","atacadão",
@@ -151,6 +151,13 @@ export const CATEGORIES: Category[] = [
       "icloud","google one","dropbox","adobe","microsoft 365","office 365","one drive",
       "antivirus","avast","kaspersky","norton","vpn ","nordvpn","expressvpn",
       "dominio","dominios","hospedagem","hosting","vercel","netlify","aws",
+      // Telecoms
+      "claro ","tim ","vivo ","nextel","net virtua","vivo fibra","oi fibra",
+      "operadora","plano celular","recarga celular","conta celular",
+      // Apple/Google
+      "apple.com","applecombill","google play","googleplay","google one",
+      // Hosting
+      "hostinger","hostgator","locaweb","kinghost","contabo","cloudflare",
     ],
   },
   {
@@ -215,12 +222,34 @@ function norm(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
+// ─── High-priority keyword overrides checked BEFORE the CATEGORIES array ─────
+// These handle cases where a generic keyword in CATEGORIES would match wrong
+// (e.g. "mercado" matching "mercadolivre", "bar" matching "barber")
+const PRIORITY_OVERRIDES: Array<{ pattern: RegExp; categoryId: string }> = [
+  // Online marketplaces — must come before "mercado" → alimentacao
+  { pattern: /mercadolivre|mercado[\s*]+livre|mercadocar|shopee|aliexpress|shein\b|amazon\b(?!.*prime|.*music|.*livro|.*book)/i, categoryId: "lazer" },
+  // Apple/Google subscriptions
+  { pattern: /apple\.com|applecombill|google\s*one|google\s*play|googleplay/i, categoryId: "assinaturas" },
+  // Telecoms — must come before generic "assinatura"
+  { pattern: /\bclaro\b|\btim\b|\bvivo\b|\boi\b(?!\s+i)|\bnextel\b|\bnet\s+virtua|\bvivo\s+fibra|\bclaro\s+net/i, categoryId: "assinaturas" },
+  // Hostinger / web hosting — before "hospit" (saude)
+  { pattern: /hostinger|hostgator|contabo|kinghost|locaweb|cloudflare|namecheap/i, categoryId: "assinaturas" },
+  // IOF (tax on financial ops) — not a real expense category, goes to outros
+  { pattern: /^iof\b/i, categoryId: "outros" },
+];
+
 export function detectCategory(description: string): string {
   const lower = norm(description);
   // Remove common bank prefixes that add noise
   const cleaned = lower
     .replace(/^(cred |deb |credito |debito |pix |ted |doc |pagamento |pg )/i, "")
-    .replace(/^(a vista |parcelado |parc |parcela )/i, "");
+    .replace(/^(a vista |parcelado |parc |parcela )/i, "")
+    .replace(/\*/g, " "); // strip asterisks common in CC descriptions (iFood*, Netflix*)
+
+  // Priority overrides first
+  for (const ov of PRIORITY_OVERRIDES) {
+    if (ov.pattern.test(cleaned) || ov.pattern.test(lower)) return ov.categoryId;
+  }
 
   for (const cat of CATEGORIES) {
     if (cat.keywords.some((kw) => cleaned.includes(norm(kw)))) return cat.id;
@@ -229,5 +258,26 @@ export function detectCategory(description: string): string {
   for (const cat of CATEGORIES) {
     if (cat.keywords.some((kw) => lower.includes(norm(kw)))) return cat.id;
   }
+  return "outros";
+}
+
+/** Map a raw bank category string (from C6, Itaú, etc.) to an internal category ID */
+export function mapBankCategory(raw: string): string {
+  if (!raw || raw === "-") return "outros";
+  const s = norm(raw);
+  if (/supermercado|mercearia|padaria|convenienc|alimenta|restaurante|lanchonete|\bbar\b|fast.?food|refeic|pizz|acougue|hortifruti/i.test(s)) return "alimentacao";
+  if (/transporte|automotiv|combustiv|pedagio|estacion|\btaxi\b|\buber\b|onibus|aeroporto|\bvoo\b|passagem|manutencao|auto.?peca|mecanica|pneu/i.test(s)) return "transporte";
+  if (/tv\s*por\s*assinatura|radio|telecom|comunicac|celular|internet|telefon|streaming|assinatura|subscri|plano\s+mensal/i.test(s)) return "assinaturas";
+  if (/entretenim|lazer|gaming|\bgame\b|cinema|musica|esport|\bviagem\b|hotel|turismo|teatro|show\b/i.test(s)) return "lazer";
+  if (/saude|farmacia|medic|clinica|academia|fitness|beleza|cosmet|barbearia|higiene|odonto|dentist|hospital|plano\s+de\s+saude/i.test(s)) return "saude";
+  if (/educac|escola|faculdade|curso|livro|treinamento|capacitac|idioma/i.test(s)) return "educacao";
+  if (/\bcasa\b|imovel|construc|morad|residenc|eletrodom|mobili|decorac|aluguel|condomin/i.test(s)) return "moradia";
+  if (/vestuario|roupa|calcado|sapato|\bmoda\b|acessorio|lingerie/i.test(s)) return "vestuario";
+  if (/energia|eletric|\bluz\b/i.test(s)) return "energia";
+  if (/agua|saneament/i.test(s)) return "agua";
+  if (/salario|folha|pagamento\s+de\s+pessoal|remuneracao/i.test(s)) return "salario";
+  if (/investimento|rendimento|aplicacao|resgate|dividendo/i.test(s)) return "investimento";
+  if (/seguro\s+saude|seguro\s+vida|plano\s+saude/i.test(s)) return "saude";
+  if (/seguro\s+auto|seguro\s+imovel/i.test(s)) return "moradia";
   return "outros";
 }
