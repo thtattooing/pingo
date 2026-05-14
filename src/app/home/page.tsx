@@ -1,3 +1,4 @@
+import React from "react";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import BottomNav from "@/components/BottomNav";
@@ -13,6 +14,15 @@ import { CATEGORIES } from "@/lib/categories";
 import Link from "next/link";
 import { BRL } from "@/lib/formatters";
 import { parseMonthParam, monthRange } from "@/lib/month-utils";
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[11px] font-semibold uppercase tracking-widest mb-2"
+      style={{ color: "var(--muted-foreground)" }}>
+      {children}
+    </p>
+  );
+}
 
 export default async function HomePage({
   searchParams,
@@ -212,58 +222,78 @@ export default async function HomePage({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-5 pb-4 flex flex-col gap-4">
+      <div className="flex-1 overflow-y-auto px-5 pb-4 flex flex-col gap-5">
+
+        {/* Hero saldo */}
         <BalanceCard balance={balance} income={income} expense={expense} userName={userName} />
 
-        <CaixaLivreCard
-          checkingBalance={checkingBalance}
-          ccNetFatura={ccNetFatura}
-          next30dCC={next30dCC}
-        />
+        {/* Caixa Disponível */}
+        <div>
+          <SectionLabel>Caixa Disponível</SectionLabel>
+          <CaixaLivreCard
+            checkingBalance={checkingBalance}
+            ccNetFatura={ccNetFatura}
+            next30dCC={next30dCC}
+          />
+        </div>
 
-        {subscriptions.length > 0 && <SubscriptionCard subscriptions={subscriptions} />}
-
-        {accounts.length > 0 && (
-          <div className="flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-            {accounts.map(acc => (
-              <Link key={acc.name} href={`/cartoes?m=${year}-${String(month).padStart(2,"0")}`}
-                className="flex-shrink-0 rounded-2xl px-4 py-3 min-w-[140px] no-underline"
-                style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <i className={`fa-solid ${acc.type === "credit_card" ? "fa-credit-card" : "fa-building-columns"} text-xs`}
-                    style={{ color: acc.type === "credit_card" ? "var(--primary)" : "#8B5CF6" }} />
-                  <span className="text-[10px] truncate max-w-[100px]" style={{ color: "var(--muted-foreground)" }}>
-                    {acc.name}
-                  </span>
-                </div>
-                <p className="mono-data text-sm font-semibold" style={{ color: "var(--expense)" }}>
-                  {BRL(acc.total)}
-                </p>
-              </Link>
-            ))}
-            {recurringTotal > 0 && (
-              <div className="flex-shrink-0 rounded-2xl px-4 py-3 min-w-[140px]"
-                style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <i className="fa-solid fa-rotate text-xs" style={{ color: "var(--gold)" }} />
-                  <span className="text-[10px]" style={{ color: "var(--muted-foreground)" }}>Recorrentes</span>
-                </div>
-                <p className="mono-data text-sm font-semibold" style={{ color: "var(--gold)" }}>
-                  {BRL(recurringTotal)}
-                </p>
-              </div>
-            )}
+        {/* Assinaturas */}
+        {subscriptions.length > 0 && (
+          <div>
+            <SectionLabel>Assinaturas do Mês</SectionLabel>
+            <SubscriptionCard subscriptions={subscriptions} />
           </div>
         )}
 
+        {/* Gastos por conta + recorrentes */}
+        {accounts.length > 0 && (
+          <div>
+            <SectionLabel>Gastos por conta</SectionLabel>
+            <div className="flex gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+              {accounts.map(acc => (
+                <Link key={acc.name} href={`/cartoes?m=${year}-${String(month).padStart(2,"0")}`}
+                  className="flex-shrink-0 rounded-2xl px-4 py-3 min-w-[130px] no-underline active:scale-95 transition-transform"
+                  style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <i className={`fa-solid ${acc.type === "credit_card" ? "fa-credit-card" : "fa-building-columns"} text-xs`}
+                      style={{ color: acc.type === "credit_card" ? "var(--primary)" : "#8B5CF6" }} />
+                    <span className="text-[10px] truncate max-w-[90px] font-medium" style={{ color: "var(--muted-foreground)" }}>
+                      {acc.name}
+                    </span>
+                  </div>
+                  <p className="mono-data text-sm font-bold" style={{ color: "var(--expense)" }}>
+                    {BRL(acc.total)}
+                  </p>
+                </Link>
+              ))}
+              {recurringTotal > 0 && (
+                <div className="flex-shrink-0 rounded-2xl px-4 py-3 min-w-[130px]"
+                  style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <i className="fa-solid fa-rotate text-xs" style={{ color: "var(--gold)" }} />
+                    <span className="text-[10px] font-medium" style={{ color: "var(--muted-foreground)" }}>Recorrentes</span>
+                  </div>
+                  <p className="mono-data text-sm font-bold" style={{ color: "var(--gold)" }}>
+                    {BRL(recurringTotal)}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Categorias */}
         {categorySummary.length > 0 && (
-          <CategoryBar categories={categorySummary} total={totalExpense} />
+          <div>
+            <SectionLabel>Categorias</SectionLabel>
+            <CategoryBar categories={categorySummary} total={totalExpense} />
+          </div>
         )}
 
         {/* Ações rápidas */}
-        <div className="flex gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <Link href="/importar"
-            className="flex-1 flex items-center gap-3 rounded-2xl px-4 py-3 no-underline transition-all active:scale-95"
+            className="flex items-center gap-3 rounded-2xl px-4 py-3 no-underline transition-all active:scale-95"
             style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
               style={{ background: "rgba(99,102,241,0.12)" }}>
@@ -275,7 +305,7 @@ export default async function HomePage({
             </div>
           </Link>
           <Link href="/ir"
-            className="flex-1 flex items-center gap-3 rounded-2xl px-4 py-3 no-underline transition-all active:scale-95"
+            className="flex items-center gap-3 rounded-2xl px-4 py-3 no-underline transition-all active:scale-95"
             style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
               style={{ background: "rgba(251,191,36,0.12)" }}>
@@ -288,26 +318,11 @@ export default async function HomePage({
           </Link>
         </div>
 
-        <Link href="/lancamento"
-          className="card-pingo flex items-center gap-4 active:scale-95 transition-transform no-underline"
-          style={{ background: "linear-gradient(135deg, #EC4899 0%, #F472B6 100%)", border: "none" }}>
-          <div className="w-11 h-11 rounded-xl flex items-center justify-center relative"
-            style={{ background: "rgba(255,255,255,0.15)" }}>
-            <i className="fa-solid fa-piggy-bank text-white text-lg" />
-            <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
-              style={{ background: "var(--gold)", color: "#100A18" }}>+</span>
-          </div>
-          <div className="flex-1">
-            <p className="font-semibold text-white text-sm">Pingar no porquinho</p>
-            <p className="text-xs text-white/70">Diga o que gastou ou recebeu</p>
-          </div>
-          <i className="fa-solid fa-arrow-right text-white/80" />
-        </Link>
-
+        {/* Transações */}
         <TransactionList transactions={transactions} />
 
         <Link href={`/transacoes?m=${year}-${String(month).padStart(2,"0")}`}
-          className="flex items-center justify-center gap-2 py-3 rounded-2xl text-sm no-underline transition-all"
+          className="flex items-center justify-center gap-2 py-3 rounded-2xl text-sm no-underline transition-all active:scale-95"
           style={{ color: "var(--muted-foreground)", border: "1px solid var(--border)" }}>
           <i className="fa-solid fa-list text-xs" />
           Ver todas as transações
