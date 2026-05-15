@@ -296,23 +296,28 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
     }
   }
 
-  // ── Guard: descI must not be a secondary date column ─────────────────────
-  // Some banks (Bradesco, Itaú, BB) have two date columns: "Data" (transaction)
-  // + "Lançamento" (settlement). The keyword "lancamento" is in the desc search
-  // list, so descI can land on a column whose values are all dates, not text.
-  // If that happens, categories never match and everything becomes "outros".
+  // ── Guard: descI must not be a secondary date/fixed-name column ──────────
+  // Rejects two bad patterns:
+  //   1. All values are dates — secondary date col (Bradesco "Lançamento", Itaú "Compensação")
+  //   2. All values are identical — fixed-name col (Pix extracts with owner/beneficiary name
+  //      repeated on every row, e.g. "THIAGO HENRIQUE" for all transactions)
+  // In both cases we search for the first column that has varied, non-date, non-numeric text.
   if (descI >= 0 && descI !== dateI) {
     const sampleDescVals = dataRows.map(r => (r[descI] ?? "").trim()).filter(v => v.length > 0);
     const descIsDateCol  = sampleDescVals.length > 0 && sampleDescVals.every(v => looksLikeDate(v));
-    if (descIsDateCol) {
+    const descIsFixed    = sampleDescVals.length >= 4 && sampleDescVals.every(v => v === sampleDescVals[0]);
+    if (descIsDateCol || descIsFixed) {
       const knownCols = new Set([dateI, descI, amtI, creditI, debitI, nuTypeI, parcelaColI, dcColI, bankCatColI].filter(i => i >= 0));
       const textCol = hdr.findIndex((_, col) => {
         if (knownCols.has(col)) return false;
         const vals = dataRows.map(r => (r[col] ?? "").trim()).filter(v => v.length > 0);
         if (vals.length === 0) return false;
-        return !vals.every(v => looksLikeDate(v)) && !vals.every(v => !isNaN(parseAmount(v)));
+        const allDates = vals.every(v => looksLikeDate(v));
+        const allNums  = vals.every(v => !isNaN(parseAmount(v)) && v.length > 0);
+        const allSame  = vals.length >= 4 && vals.every(v => v === vals[0]);
+        return !allDates && !allNums && !allSame;
       });
-      descI = textCol; // -1 if no text column found, description fallback handles it
+      descI = textCol; // -1 if no suitable column found
     }
   }
 
