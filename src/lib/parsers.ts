@@ -296,6 +296,26 @@ export function parseCSV(content: string): { rows: ParsedRow[]; debug: ParseDebu
     }
   }
 
+  // ── Guard: descI must not be a secondary date column ─────────────────────
+  // Some banks (Bradesco, Itaú, BB) have two date columns: "Data" (transaction)
+  // + "Lançamento" (settlement). The keyword "lancamento" is in the desc search
+  // list, so descI can land on a column whose values are all dates, not text.
+  // If that happens, categories never match and everything becomes "outros".
+  if (descI >= 0 && descI !== dateI) {
+    const sampleDescVals = dataRows.map(r => (r[descI] ?? "").trim()).filter(v => v.length > 0);
+    const descIsDateCol  = sampleDescVals.length > 0 && sampleDescVals.every(v => looksLikeDate(v));
+    if (descIsDateCol) {
+      const knownCols = new Set([dateI, descI, amtI, creditI, debitI, nuTypeI, parcelaColI, dcColI, bankCatColI].filter(i => i >= 0));
+      const textCol = hdr.findIndex((_, col) => {
+        if (knownCols.has(col)) return false;
+        const vals = dataRows.map(r => (r[col] ?? "").trim()).filter(v => v.length > 0);
+        if (vals.length === 0) return false;
+        return !vals.every(v => looksLikeDate(v)) && !vals.every(v => !isNaN(parseAmount(v)));
+      });
+      descI = textCol; // -1 if no text column found, description fallback handles it
+    }
+  }
+
   // ── BRL vs USD column disambiguation ─────────────────────────────────────
   // C6 fatura has: "Valor (em US$)", "Cotação (em R$)", "Valor (em R$)"
   // "Cotação" is the exchange rate (e.g. 5.35), not the purchase amount —
