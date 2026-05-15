@@ -395,39 +395,24 @@ export default function ImportarClient({ userId, recentHashes, manualDateAmounts
     }));
 
     // ignoreDuplicates: false → ON CONFLICT DO UPDATE, so reimporting corrects account_type
-    let { error } = await supabase.from("transactions").upsert(fullPayload, {
+    const { error } = await supabase.from("transactions").upsert(fullPayload, {
       onConflict: "user_id,account_name,dedup_hash",
       ignoreDuplicates: false,
     });
 
-    // If columns don't exist yet (schema not migrated), retry with only base columns
-    const isSchemaError = error && (
-      error.code === "42703" ||
-      error.code === "PGRST204" ||
-      error.message?.toLowerCase().includes("column") ||
-      error.message?.toLowerCase().includes("could not find") ||
-      error.message?.toLowerCase().includes("does not exist")
-    );
-    if (isSchemaError) {
-      setSchemaWarning(true);
-      const basePayload = toSave.map(r => ({
-        user_id:             userId,
-        description:         r.description,
-        amount:              r.amount,
-        type:                r.type,
-        category_id:         r.categoryId,
-        date:                r.date,
-        is_imported:         true,
-        installments:        1,
-        installment_current: 1,
-      }));
-      const fallback = await supabase.from("transactions").insert(basePayload);
-      error = fallback.error;
-    }
-
     if (error) {
       setSaving(false);
-      setSaveError(error.message ?? "Erro ao salvar. Tente novamente.");
+      // Show a clear actionable message for schema errors (missing column)
+      const isSchemaError =
+        error.code === "42703" ||
+        error.code === "PGRST204" ||
+        error.message?.toLowerCase().includes("could not find") ||
+        error.message?.toLowerCase().includes("does not exist");
+      setSaveError(
+        isSchemaError
+          ? `Schema desatualizado: ${error.message}. Execute o supabase-schema-v8.sql no SQL Editor.`
+          : (error.message ?? "Erro ao salvar. Tente novamente.")
+      );
       return;
     }
 
